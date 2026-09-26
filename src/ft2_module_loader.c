@@ -249,12 +249,18 @@ void loadMusic(UNICHAR *filenameU)
 	mouseAnimOn();
 
 	moduleLoaded = moduleFailedToLoad = false;
-
-	clearTmpModule(); // clear stuff from last loading session (very important)
+	clearTmpModule();
 	UNICHAR_STRCPY(editor.tmpFilenameU, filenameU);
-
 	musicIsLoading = true;
 
+#ifdef __EMSCRIPTEN__
+	doLoadMusic(false);
+	if (moduleLoaded)
+		setupLoadedModule();
+	editor.loadMusicEvent = EVENT_NONE;
+	musicIsLoading = false;
+	mouseAnimOff();
+#else
 	thread = SDL_CreateThread(loadMusicThread, "mod load thread", NULL);
 	if (thread == NULL)
 	{
@@ -265,6 +271,7 @@ void loadMusic(UNICHAR *filenameU)
 	}
 
 	SDL_DetachThread(thread);
+#endif
 }
 
 static bool loadMusicUnthreaded(UNICHAR *filenameU)

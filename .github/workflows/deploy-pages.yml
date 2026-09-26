@@ -1,0 +1,89 @@
+name: Build and deploy GitHub Pages
+
+on:
+  push:
+    branches:
+      - master
+      - "sync-build-*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "pages-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: emscripten-core/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Show Emscripten version
+        run: emcc --version
+
+      - name: Build WebAssembly
+        run: python3 build-emscripten.py
+
+      - name: Verify web bundle
+        run: |
+          test -s build_emscripten/web/ft2-clone.html
+          test -s build_emscripten/web/ft2-clone.js
+          test -s build_emscripten/web/ft2-clone.wasm
+          test -s build_emscripten/web/ft2-clone.data
+
+      - name: Prepare Pages artifact
+        run: |
+          rm -rf pages
+          mkdir -p pages
+          cp build_emscripten/web/ft2-clone.html pages/
+          cp build_emscripten/web/ft2-clone.js pages/
+          cp build_emscripten/web/ft2-clone.wasm pages/
+          cp build_emscripten/web/ft2-clone.data pages/
+          cat > pages/index.html <<'EOF'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8">
+              <meta http-equiv="refresh" content="0; url=ft2-clone.html">
+              <title>FastTracker II Clone</title>
+            </head>
+            <body>
+              <a href="ft2-clone.html">Open FastTracker II Clone</a>
+            </body>
+          </html>
+          EOF
+          touch pages/.nojekyll
+
+      - name: Configure Pages
+        if: github.ref == 'refs/heads/master'
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./pages
+
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -17,7 +17,11 @@
 #else
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifndef __EMSCRIPTEN__
 #include <fts.h> // for fts_open() and stuff in recursiveDelete()
+#else
+#include <emscripten.h>
+#endif
 #include <unistd.h>
 #include <dirent.h>
 #include <errno.h>
@@ -81,7 +85,9 @@ static bool FReq_ShowAllFiles, insPathSet, smpPathSet, patPathSet, trkPathSet, f
 static int32_t FReq_EntrySelected = -1, FReq_FileCount, FReq_DirPos, lastMouseY;
 static UNICHAR *FReq_CurPathU, *FReq_ModCurPathU, *FReq_InsCurPathU, *FReq_SmpCurPathU, *FReq_PatCurPathU, *FReq_TrkCurPathU;
 static DirRec *FReq_Buffer;
+#ifndef __EMSCRIPTEN__
 static SDL_Thread *thread;
+#endif
 
 static void setDiskOpItem(uint8_t item);
 
@@ -357,10 +363,31 @@ bool setupDiskOp(void)
 	strcpy(trkTmpFName, "untitled.xt");
 
 	setupInitialPaths();
+#ifdef __EMSCRIPTEN__
+	EM_ASM({
+		try { FS.mkdir('/home'); } catch (e) {}
+		try { FS.mkdir('/home/web_user'); } catch (e) {}
+	});
+	if (chdir("/home/web_user") == 0)
+		UNICHAR_STRCPY(FReq_ModCurPathU, "/home/web_user");
+	else if (chdir("/home") == 0)
+		UNICHAR_STRCPY(FReq_ModCurPathU, "/home");
+#endif
 	setDiskOpItem(0);
 
 	return true;
 }
+
+#ifdef __EMSCRIPTEN__
+void syncPersistentStorage(bool load)
+{
+	EM_ASM({
+		FS.syncfs(!!$0, function(err) {
+			if (err) console.error('Persistent storage sync error:', err);
+		});
+	}, load);
+}
+#endif
 
 int32_t getExtOffset(char *s, int32_t stringLen) // get byte offset of file extension (last '.')
 {
@@ -504,6 +531,7 @@ bool fileExistsAnsi(char *str)
 
 static bool deleteDirRecursive(UNICHAR *strU)
 {
+#ifndef __EMSCRIPTEN__
 	FTSENT *curr;
 	char *files[] = { (char *)(strU), NULL };
 
@@ -546,6 +574,9 @@ static bool deleteDirRecursive(UNICHAR *strU)
 		fts_close(ftsp);
 
 	return ret;
+#else
+	return remove((char *)strU) == 0;
+#endif
 }
 
 static bool makeDirAnsi(char *str)
@@ -1986,6 +2017,9 @@ void diskOp_StartDirReadThread(void)
 	editor.diskOpReadDone = false;
 
 	mouseAnimOn();
+#ifdef __EMSCRIPTEN__
+	diskOp_ReadDirectoryThread(NULL);
+#else
 	thread = SDL_CreateThread(diskOp_ReadDirectoryThread, "file lister thread", NULL);
 	if (thread == NULL)
 	{
@@ -1995,6 +2029,7 @@ void diskOp_StartDirReadThread(void)
 	}
 
 	SDL_DetachThread(thread);
+#endif
 }
 
 static void drawSaveAsElements(void)
@@ -2259,8 +2294,15 @@ void showDiskOpScreen(void)
 		// first test if we can change the dir to the one stored in the config (if present)
 		if (FReq_ModCurPathU[0] == '\0' || UNICHAR_CHDIR(FReq_ModCurPathU) != 0)
 		{
-			// nope, couldn't do that, set Disk Op. path to the user's desktop directory
-#ifdef _WIN32
+			// nope, couldn't do that, set Disk Op. path to a suitable user directory
+#ifdef __EMSCRIPTEN__
+			if (UNICHAR_CHDIR("/home/web_user") == 0)
+				UNICHAR_STRCPY(FReq_ModCurPathU, "/home/web_user");
+			else if (UNICHAR_CHDIR("/home") == 0)
+				UNICHAR_STRCPY(FReq_ModCurPathU, "/home");
+			else
+				UNICHAR_GETCWD(FReq_ModCurPathU, PATH_MAX);
+#elif defined(_WIN32)
 			SHGetFolderPathW(NULL, CSIDL_DESKTOPDIRECTORY, NULL, 0, FReq_ModCurPathU);
 #else
 			char *home = getenv("HOME");
@@ -2432,6 +2474,13 @@ void pbDiskOpRefresh(void)
 	setupDiskOpDrives();
 #endif
 }
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE void refreshModuleDirectory(void)
+{
+	pbDiskOpRefresh();
+}
+#endif
 
 void pbDiskOpSetPath(void)
 {

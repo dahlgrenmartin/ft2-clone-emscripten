@@ -85,3 +85,6 @@ void rbDiskOpSmpSaveIff(void);
 void trimEntryName(char *name, bool isDir);
 void createFileOverwriteText(char *filename, char *buffer);
 bool fileExistsAnsi(char *str);
+#ifdef __EMSCRIPTEN__
+void syncPersistentStorage(bool load);
+#endif

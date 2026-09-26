@@ -5,6 +5,9 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #include "ft2_header.h"
 #include "ft2_gui.h"
 #include "ft2_video.h"
@@ -923,8 +926,51 @@ void readMouseXY(void)
 	if (my == -1) my = 0;
 
 	// multiply coords by video upscaling factors
+#ifdef __EMSCRIPTEN__
+	int32_t canvasMouseX = EM_ASM_INT({
+		var canvas = document.getElementById('canvas');
+		if (!canvas || !Module.lastMouseEvent) return 0;
+		var rect = canvas.getBoundingClientRect();
+		return Math.floor(Module.lastMouseEvent.clientX - rect.left);
+	});
+	int32_t canvasMouseY = EM_ASM_INT({
+		var canvas = document.getElementById('canvas');
+		if (!canvas || !Module.lastMouseEvent) return 0;
+		var rect = canvas.getBoundingClientRect();
+		return Math.floor(Module.lastMouseEvent.clientY - rect.top);
+	});
+	int32_t canvasW = EM_ASM_INT({ var c=document.getElementById('canvas'); return c ? c.clientWidth : 632; });
+	int32_t canvasH = EM_ASM_INT({ var c=document.getElementById('canvas'); return c ? c.clientHeight : 400; });
+	const double targetAspect = (double)SCREEN_W / SCREEN_H;
+	const double canvasAspect = canvasH > 0 ? (double)canvasW / canvasH : targetAspect;
+	int32_t renderW, renderH, renderX, renderY;
+	if (canvasAspect > targetAspect)
+	{
+		renderH = canvasH;
+		renderW = (int32_t)(canvasH * targetAspect);
+		renderX = (canvasW - renderW) / 2;
+		renderY = 0;
+	}
+	else
+	{
+		renderW = canvasW;
+		renderH = (int32_t)(canvasW / targetAspect);
+		renderX = 0;
+		renderY = (canvasH - renderH) / 2;
+	}
+	if (renderW > 0 && renderH > 0)
+	{
+		mouse.x = (int32_t)(((canvasMouseX - renderX) * SCREEN_W) / renderW);
+		mouse.y = (int32_t)(((canvasMouseY - renderY) * SCREEN_H) / renderH);
+		if (mouse.x < 0) mouse.x = 0;
+		if (mouse.y < 0) mouse.y = 0;
+		if (mouse.x >= SCREEN_W) mouse.x = SCREEN_W - 1;
+		if (mouse.y >= SCREEN_H) mouse.y = SCREEN_H - 1;
+	}
+#else
 	mouse.x = (int32_t)floor(mx * video.dMouseXMul);
 	mouse.y = (int32_t)floor(my * video.dMouseYMul);
+#endif
 
 	if (config.specialFlags2 & HARDWARE_MOUSE)
 	{

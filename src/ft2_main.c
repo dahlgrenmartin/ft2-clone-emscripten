@@ -250,6 +250,9 @@ int main(int argc, char *argv[])
 		handleThreadEvents();
 		readInput();
 		handleEvents();
+#ifdef __EMSCRIPTEN__
+		updateScopesFromMainThread();
+#endif
 		handleRedrawing();
 		flipFrame();
 		endFPSCounter();

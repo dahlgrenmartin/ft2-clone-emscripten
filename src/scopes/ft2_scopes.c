@@ -544,6 +544,7 @@ static int32_t scopeThreadFunc(void *ptr)
 
 bool initScopes(void)
 {
+#ifndef __EMSCRIPTEN__
 	scopeThread = SDL_CreateThread(scopeThreadFunc, "scope thread", NULL);
 	if (scopeThread == NULL)
 	{
@@ -552,5 +553,19 @@ bool initScopes(void)
 	}
 
 	SDL_DetachThread(scopeThread);
+#else
+	hpc_SetDurationInHz(&scopeHpc, SCOPE_HZ);
+	hpc_ResetCounters(&scopeHpc);
+#endif
 	return true;
+}
+
+void updateScopesFromMainThread(void)
+{
+#ifdef __EMSCRIPTEN__
+	hpc_Wait(&scopeHpc);
+	editor.scopeThreadBusy = true;
+	updateScopes();
+	editor.scopeThreadBusy = false;
+#endif
 }

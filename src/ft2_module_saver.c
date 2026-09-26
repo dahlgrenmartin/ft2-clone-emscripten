@@ -275,6 +275,9 @@ bool saveXM(UNICHAR *filenameU)
 	removeSongModifiedFlag();
 
 	fclose(f);
+#ifdef __EMSCRIPTEN__
+	syncPersistentStorage(false);
+#endif
 
 	editor.diskOpReadDir = true; // force diskop re-read
 
@@ -634,6 +637,9 @@ static bool saveMOD(UNICHAR *filenameU)
 
 	fclose(f);
 	removeSongModifiedFlag();
+#ifdef __EMSCRIPTEN__
+	syncPersistentStorage(false);
+#endif
 
 	editor.diskOpReadDir = true; // force diskop re-read
 

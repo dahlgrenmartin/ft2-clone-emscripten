@@ -299,6 +299,22 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 	if (srcLen <= 0)
 		return NULL;
 
+#ifdef __EMSCRIPTEN__
+	char *outBuf = (char *)malloc(srcLen + 1);
+	if (outBuf == NULL)
+		return NULL;
+	memcpy(outBuf, src, srcLen + 1);
+	if (removeIllegalChars)
+	{
+		for (size_t i = 0; i < srcLen; i++)
+		{
+			const int8_t ch = (const int8_t)outBuf[i];
+			if (ch != '\0' && ch < 32)
+				outBuf[i] = ' ';
+		}
+	}
+	return outBuf;
+#else
 #ifdef __APPLE__
 	iconv_t cd = iconv_open("850//TRANSLIT//IGNORE", "UTF-8-MAC");
 #elif defined(__NetBSD__) || defined(__sun) || defined(sun)
@@ -353,5 +369,6 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 	}
 
 	return outBuf;
+#endif // __EMSCRIPTEN__
 }
 #endif
