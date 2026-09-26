@@ -384,7 +384,6 @@ pushButton_t pushButtons[NUM_PUSHBUTTONS] =
 	{  70,  53, 58, 16, 0, 0, "Make dir.",          NULL,    NULL,            pbDiskOpMakeDir },
 	{  70,  70, 58, 16, 0, 0, "Refresh",            NULL,    NULL,            pbDiskOpRefresh },
 	{  70,  87, 58, 16, 0, 0, "Set path",           NULL,    NULL,            pbDiskOpSetPath },
-	{  70, 104, 58, 16, 0, 0, "Show all",           NULL,    NULL,            pbDiskOpShowAll },
 	{  70, 121, 58, 19, 0, 0, "Exit",               NULL,    NULL,            pbDiskOpExit },
 #ifdef _WIN32 // partition letters
 	{ 134,   2, 31, 13, 0, 0, DISKOP_PARENT_STRING, NULL,    NULL,            pbDiskOpParent },
@@ -406,16 +405,16 @@ pushButton_t pushButtons[NUM_PUSHBUTTONS] =
 
 	// ------ WAV RENDERER PUSHBUTTONS ------
 	//x,   y,   w,  h,  p, d, text #1,           text #2, funcOnDown,         funcOnUp
-	{   3, 138, 73, 16, 0, 0, "Export",          NULL,    NULL,               pbWavRender },
-	{   3, 155, 73, 16, 0, 0, "Exit",            NULL,    NULL,               pbWavExit },
+	{   3, 111, 53, 43, 0, 0, "Export",          NULL,    NULL,               pbWavRender },
+	{   3, 155, 53, 16, 0, 0, "Exit",            NULL,    NULL,               pbWavExit },
 	{ 253, 114, 18, 13, 1, 6, ARROW_UP_STRING,   NULL,    pbWavFreqUp,        NULL },
 	{ 270, 114, 18, 13, 1, 6, ARROW_DOWN_STRING, NULL,    pbWavFreqDown,      NULL },
 	{ 253, 128, 18, 13, 1, 4, ARROW_UP_STRING,   NULL,    pbWavAmpUp,         NULL },
 	{ 270, 128, 18, 13, 1, 4, ARROW_DOWN_STRING, NULL,    pbWavAmpDown,       NULL },
-	{ 253, 142, 18, 13, 1, 4, ARROW_UP_STRING,   NULL,    pbWavSongStartUp,   NULL },
-	{ 270, 142, 18, 13, 1, 4, ARROW_DOWN_STRING, NULL,    pbWavSongStartDown, NULL },
-	{ 253, 156, 18, 13, 1, 4, ARROW_UP_STRING,   NULL,    pbWavSongEndUp,     NULL },
-	{ 270, 156, 18, 13, 1, 4, ARROW_DOWN_STRING, NULL,    pbWavSongEndDown,   NULL }
+	{ 138, 142, 18, 13, 1, 4, ARROW_UP_STRING,   NULL,    pbWavSongStartUp,   NULL },
+	{ 155, 142, 18, 13, 1, 4, ARROW_DOWN_STRING, NULL,    pbWavSongStartDown, NULL },
+	{ 253, 142, 18, 13, 1, 4, ARROW_UP_STRING,   NULL,    pbWavSongEndUp,     NULL },
+	{ 270, 142, 18, 13, 1, 4, ARROW_DOWN_STRING, NULL,    pbWavSongEndDown,   NULL }
 };
 
 static uint32_t tmpCounter;
@@ -424,7 +423,7 @@ void drawPushButton(uint16_t pushButtonID)
 {
 	uint16_t textX, textY, textW;
 
-	assert(pushButtonID < NUM_PUSHBUTTONS);
+	ASSERT(pushButtonID < NUM_PUSHBUTTONS);
 
 	pushButton_t *b = &pushButtons[pushButtonID];
 	if (!b->visible)
@@ -437,7 +436,7 @@ void drawPushButton(uint16_t pushButtonID)
 	uint16_t w = b->w;
 	uint16_t h = b->h;
 
-	assert(x < SCREEN_W && y < SCREEN_H && w >= 4 && h >= 4);
+	ASSERT(x < SCREEN_W && y < SCREEN_H && w >= 4 && h >= 4);
 
 	if (b->bitmapFlag)
 	{
@@ -544,14 +543,14 @@ void drawPushButton(uint16_t pushButtonID)
 
 void showPushButton(uint16_t pushButtonID)
 {
-	assert(pushButtonID < NUM_PUSHBUTTONS);
+	ASSERT(pushButtonID < NUM_PUSHBUTTONS);
 	pushButtons[pushButtonID].visible = true;
 	drawPushButton(pushButtonID);
 }
 
 void hidePushButton(uint16_t pushButtonID)
 {
-	assert(pushButtonID < NUM_PUSHBUTTONS);
+	ASSERT(pushButtonID < NUM_PUSHBUTTONS);
 	pushButtons[pushButtonID].state = 0;
 	pushButtons[pushButtonID].visible = false;
 }
@@ -560,7 +559,7 @@ void handlePushButtonsWhileMouseDown(void)
 {
 	int8_t buttonDelay;
 
-	assert(mouse.lastUsedObjectID >= 0 && mouse.lastUsedObjectID < NUM_PUSHBUTTONS);
+	ASSERT(mouse.lastUsedObjectID >= 0 && mouse.lastUsedObjectID < NUM_PUSHBUTTONS);
 	pushButton_t *pushButton = &pushButtons[mouse.lastUsedObjectID];
 	if (!pushButton->visible)
 		return;
@@ -668,7 +667,7 @@ int16_t testPushButtonMouseRelease(bool runCallback)
 	if (mouse.lastUsedObjectType != OBJECT_PUSHBUTTON || mouse.lastUsedObjectID == OBJECT_ID_NONE)
 		return -1;
 
-	assert(mouse.lastUsedObjectID < NUM_PUSHBUTTONS);
+	ASSERT(mouse.lastUsedObjectID < NUM_PUSHBUTTONS);
 	pushButton_t *pushButton = &pushButtons[mouse.lastUsedObjectID];
 	if (!pushButton->visible)
 		return -1;

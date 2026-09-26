@@ -168,8 +168,7 @@ def get_source_files(script_dir):
         "src/mixer/*.c",
         "src/scopes/*.c",
         "src/modloaders/*.c",
-        "src/smploaders/*.c",
-        "src/libflac/*.c"
+        "src/smploaders/*.c"
     ]
     
     all_source_files = []
@@ -191,14 +190,12 @@ def build_with_direct_emcc(script_dir, build_dir):
     compiler_flags = [
         "-O3",
         "-DNDEBUG", 
-        "-DHAS_LIBFLAC",
         "-D__EMSCRIPTEN__",
         "-Wall",
         "-Wno-unused-result",
         "-Wno-missing-field-initializers",
         "-Wno-strict-aliasing",
         "-I", "src",
-        "-I", "src/libflac",
         "-I", "src/mixer", 
         "-I", "src/scopes"
     ]
@@ -215,7 +212,7 @@ def build_with_direct_emcc(script_dir, build_dir):
         "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_refreshModuleDirectory",
         "-sFORCE_FILESYSTEM=1",
         "-lidbfs.js",
-        f"--embed-file={script_dir}/src/gfxdata/bmp@/",
+        f"--preload-file={script_dir}/src/gfxdata/bmp@/",
         f"--shell-file={script_dir}/web/shell.html"
     ]
     

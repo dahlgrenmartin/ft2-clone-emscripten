@@ -12,6 +12,7 @@
 #include "ft2_video.h"
 #include "ft2_sampling.h"
 #include "ft2_structs.h"
+#include "ft2_audioselector.h"
 
 #define STEREO_SAMPLE_HEIGHT (SAMPLE_AREA_HEIGHT/2)
 #define SAMPLE_L_CENTER (SAMPLE_AREA_Y_CENTER - (STEREO_SAMPLE_HEIGHT/2))
@@ -38,7 +39,7 @@ static uint32_t samplingRate;
 static sample_t *smpL, *smpR;
 static SDL_AudioDeviceID recordDev;
 
-static void SDLCALL stereoSamplingCallback(void *userdata, Uint8 *stream, int len)
+static void stereoSamplingCallback(void *userdata, Uint8 *stream, int len)
 {
 	const int32_t samples = len >> 2;
 	if (instr[editor.curInstr] == NULL || samples < 0 || samples > samplingBufferSize)
@@ -100,7 +101,7 @@ static void SDLCALL stereoSamplingCallback(void *userdata, Uint8 *stream, int le
 	(void)userdata;
 }
 
-static void SDLCALL monoSamplingCallback(void *userdata, Uint8 *stream, int len)
+static void monoSamplingCallback(void *userdata, Uint8 *stream, int len)
 {
 	const int32_t samples = len >> 1;
 	if (instr[editor.curInstr] == NULL || samples < 0 || samples > samplingBufferSize)
@@ -170,7 +171,7 @@ static void getMinMax16(const int16_t *p, uint32_t position, uint32_t scanLen, i
 	int16_t minVal =  32767;
 	int16_t maxVal = -32768;
 
-	assert(position+scanLen <= PREVIEW_SAMPLES);
+	ASSERT(position+scanLen <= PREVIEW_SAMPLES);
 
 	const int16_t *ptr16 = (const int16_t *)p + position;
 	for (uint32_t i = 0; i < scanLen; i++)
@@ -355,7 +356,11 @@ void startSampling(void)
 	want.callback = sampleInStereo ? stereoSamplingCallback : monoSamplingCallback;
 	want.samples = SAMPLING_BUFFER_SIZE;
 
-	recordDev = SDL_OpenAudioDevice(audio.currInputDevice, true, &want, &have, 0);
+	char *device = audio.currInputDevice;
+	if (device != NULL && strcmp(device, DEFAULT_AUDIO_DEV_STR) == 0)
+		device = NULL; // force default device
+
+	recordDev = SDL_OpenAudioDevice(device, true, &want, &have, 0);
 	if (recordDev == 0)
 	{
 		okBox(0, "System message", "Couldn't open the input device! Try adjusting the input rate at the config screen.", NULL);

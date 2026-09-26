@@ -70,7 +70,7 @@ static void loadConfigFromBuffer(bool defaults)
 {
 	lockMixerCallback();
 
-	assert(sizeof(config) == CONFIG_FILE_SIZE);
+	ASSERT(sizeof(config) == CONFIG_FILE_SIZE);
 	memcpy(&config, configBuffer, CONFIG_FILE_SIZE);
 
 	if (defaults)
@@ -95,9 +95,9 @@ static void loadConfigFromBuffer(bool defaults)
 	// clamp user palette values
 	for (int32_t i = 0; i < 16; i++)
 	{
-		config.userPal->r = palMax(config.userPal->r);
-		config.userPal->g = palMax(config.userPal->g);
-		config.userPal->b = palMax(config.userPal->b);
+		if (config.userPal->r > 63) config.userPal->r = 63;
+		if (config.userPal->g > 63) config.userPal->g = 63;
+		if (config.userPal->b > 63) config.userPal->b = 63;
 	}
 
 	// copy over user palette
@@ -188,7 +188,7 @@ static void loadConfigFromBuffer(bool defaults)
 	changeLogoType(config.id_FastLogo);
 	changeBadgeType(config.id_TritonProd);
 	ui.maxVisibleChannels = (uint8_t)(2 + ((config.ptnMaxChannels + 1) * 2));
-	setPal16(palTable[config.cfg_StdPalNum], true);
+	setPalette(palTable[config.cfg_StdPalNum], REDRAW_SCREEN);
 	updatePattFontPtrs();
 
 	unlockMixerCallback();
@@ -257,7 +257,7 @@ void resetConfig(void)
 	saveConfig(false);
 
 	// redraw new changes
-	showTopScreen(false);
+	showTopScreen(DONT_RESTORE_SCREENS);
 	showBottomScreen();
 
 	setWindowSizeFromConfig(true);
@@ -367,7 +367,7 @@ void loadConfig2(void) // called by "Load config" button
 	loadConfig(CONFIG_SHOW_ERRORS);
 
 	// redraw new changes
-	showTopScreen(false);
+	showTopScreen(DONT_RESTORE_SCREENS);
 	showBottomScreen();
 
 	setWindowSizeFromConfig(true);
@@ -430,12 +430,9 @@ bool saveConfig(bool showErrorFlag)
 	}
 
 	fclose(f);
-
 #ifdef __EMSCRIPTEN__
-	// Sync to persistent storage after successful config save
 	syncPersistentStorage(false);
 #endif
-
 	return true;
 }
 
@@ -628,21 +625,15 @@ static void setConfigFileLocation(void) // kinda hackish
 	// Linux etc
 #else
 #ifdef __EMSCRIPTEN__
-	// Emscripten - use persistent storage directory
 	int32_t ft2DotCfgStrLen = (int32_t)UNICHAR_STRLEN("FT2.CFG");
-
 	editor.configFileLocationU = (UNICHAR *)malloc((PATH_MAX + ft2DotCfgStrLen + 1) * sizeof (UNICHAR));
 	if (editor.configFileLocationU == NULL)
 	{
 		showErrorMsgBox("Error: Couldn't set config file location. You can't load/save the config!");
 		return;
 	}
-
-	// Use persistent storage directory for config
-	strcpy(editor.configFileLocationU, "/persistent");
-	strcat(editor.configFileLocationU, "/FT2.CFG");
+	UNICHAR_STRCPY(editor.configFileLocationU, "/persistent/FT2.CFG");
 #else
-	// Regular Unix/Linux
 	int32_t ft2DotCfgStrLen = (int32_t)UNICHAR_STRLEN("FT2.CFG");
 
 	editor.configFileLocationU = (UNICHAR *)malloc((PATH_MAX + ft2DotCfgStrLen + 1) * sizeof (UNICHAR));
@@ -695,7 +686,7 @@ static void setConfigFileLocation(void) // kinda hackish
 	}
 
 	strcat(editor.configFileLocationU, "/FT2.CFG");
-#endif
+#endif // __EMSCRIPTEN__
 #endif
 
 #ifdef HAS_MIDI
@@ -861,8 +852,6 @@ void setConfigAudioRadioButtonStates(void) // accessed by other .c files
 		tmpID = RB_CONFIG_AUDIO_INTRP_SINC16;
 	else if (config.interpolation == INTERPOLATION_CUBIC)
 		tmpID = RB_CONFIG_AUDIO_INTRP_CUBIC;
-	else if (config.interpolation == INTERPOLATION_QUADRATIC)
-		tmpID = RB_CONFIG_AUDIO_INTRP_QUADRATIC;
 	else
 		tmpID = RB_CONFIG_AUDIO_INTRP_SINC8; // default case
 
@@ -905,6 +894,9 @@ void setConfigAudioRadioButtonStates(void) // accessed by other .c files
 
 static void setConfigAudioCheckButtonStates(void)
 {
+	checkBoxes[CB_CONF_PRECISE_BPM].checked = (config.specialFlags2 & PRECISE_BPM) ? true : false;
+	showCheckBox(CB_CONF_PRECISE_BPM);
+
 	checkBoxes[CB_CONF_VOL_RAMP].checked = (config.specialFlags & NO_VOLRAMP_FLAG) ? false : true;
 	showCheckBox(CB_CONF_VOL_RAMP);
 }
@@ -1047,7 +1039,7 @@ static void setConfigMiscCheckButtonStates(void)
 	checkBoxes[CB_CONF_REC_KEYOFF].checked = config.recRelease;
 	checkBoxes[CB_CONF_QUANTIZATION].checked = config.recQuant;
 	checkBoxes[CB_CONF_CHANGE_PATTLEN_INS_DEL].checked = config.recTrueInsert;
-	checkBoxes[CB_CONF_USE_OLD_ABOUT_SCREEN].checked = !config.useNewAboutScreen;
+	checkBoxes[CB_CONF_ORIG_FT2_PATT_LAYOUT].checked = !config.ptnAlternativeLayout;
 #ifdef HAS_MIDI
 	checkBoxes[CB_CONF_MIDI_ENABLE].checked = midi.enable;
 #else
@@ -1072,7 +1064,7 @@ static void setConfigMiscCheckButtonStates(void)
 	showCheckBox(CB_CONF_REC_KEYOFF);
 	showCheckBox(CB_CONF_QUANTIZATION);
 	showCheckBox(CB_CONF_CHANGE_PATTLEN_INS_DEL);
-	showCheckBox(CB_CONF_USE_OLD_ABOUT_SCREEN);
+	showCheckBox(CB_CONF_ORIG_FT2_PATT_LAYOUT);
 	showCheckBox(CB_CONF_MIDI_ENABLE);
 	showCheckBox(CB_CONF_MIDI_REC_ALL);
 	showCheckBox(CB_CONF_MIDI_REC_TRANS);
@@ -1195,12 +1187,12 @@ void showConfigScreen(void)
 			textOutShadow(405,  74, PAL_FORGRND, PAL_DSKTOP2, "16-bit");
 			textOutShadow(468,  74, PAL_FORGRND, PAL_DSKTOP2, "32-bit");
 
-			textOutShadow(405,  91, PAL_FORGRND, PAL_DSKTOP2, "No interpolation");
-			textOutShadow(405, 105, PAL_FORGRND, PAL_DSKTOP2, "Linear (FT2)");
-			textOutShadow(405, 119, PAL_FORGRND, PAL_DSKTOP2, "Quadratic spline");
-			textOutShadow(405, 133, PAL_FORGRND, PAL_DSKTOP2, "Cubic spline");
-			textOutShadow(405, 147, PAL_FORGRND, PAL_DSKTOP2, "Sinc (8 point)");
-			textOutShadow(405, 161, PAL_FORGRND, PAL_DSKTOP2, "Sinc (16 point)");
+			textOutShadow(405,  90, PAL_FORGRND, PAL_DSKTOP2, "No interpolation");
+			textOutShadow(405, 104, PAL_FORGRND, PAL_DSKTOP2, "Linear (FT2)");
+			textOutShadow(405, 118, PAL_FORGRND, PAL_DSKTOP2, "Cubic spline");
+			textOutShadow(405, 132, PAL_FORGRND, PAL_DSKTOP2, "Sinc (8 point)");
+			textOutShadow(405, 146, PAL_FORGRND, PAL_DSKTOP2, "Sinc (16 point)");
+			textOutShadow(405, 160, PAL_FORGRND, PAL_DSKTOP2, "Precise BPM");
 
 			textOutShadow(513,   3, PAL_FORGRND, PAL_DSKTOP2, "Audio output rate:");
 			textOutShadow(528,  17, PAL_FORGRND, PAL_DSKTOP2, "44100Hz");
@@ -1222,8 +1214,8 @@ void showConfigScreen(void)
 			configDrawAmp();
 			configDrawMasterVol();
 
-			setScrollBarPos(SB_AMP_SCROLL,       config.boostLevel - 1, false);
-			setScrollBarPos(SB_MASTERVOL_SCROLL, config.masterVol,      false);
+			setScrollBarPos(SB_AMP_SCROLL,       config.boostLevel - 1, DONT_TRIGGER_CALLBACK);
+			setScrollBarPos(SB_MASTERVOL_SCROLL, config.masterVol,      DONT_TRIGGER_CALLBACK);
 
 			showScrollBar(SB_AUDIO_INPUT_SCROLL);
 			showScrollBar(SB_AUDIO_OUTPUT_SCROLL);
@@ -1330,8 +1322,8 @@ void showConfigScreen(void)
 			drawFramework(485,  75, 145,  14, FRAMEWORK_TYPE2);
 
 			textOutShadow(114,   3, PAL_FORGRND, PAL_DSKTOP2, "Dir. sorting pri.:");
-			textOutShadow(130,  16, PAL_FORGRND, PAL_DSKTOP2, "Ext.");
-			textOutShadow(130,  30, PAL_FORGRND, PAL_DSKTOP2, "Name");
+			textOutShadow(130,  16, PAL_FORGRND, PAL_DSKTOP2, "Extension");
+			textOutShadow(130,  30, PAL_FORGRND, PAL_DSKTOP2, "Filename");
 
 			textOutShadow(228,   4, PAL_FORGRND, PAL_DSKTOP2, "Sample \"cut to buffer\"");
 			textOutShadow(228,  17, PAL_FORGRND, PAL_DSKTOP2, "Pattern \"cut to buffer\"");
@@ -1366,7 +1358,7 @@ void showConfigScreen(void)
 			textOutShadow(338, 122, PAL_FORGRND, PAL_DSKTOP2, "1/");
 			textOutShadow(228, 135, PAL_FORGRND, PAL_DSKTOP2, "Change pattern length when");
 			textOutShadow(228, 146, PAL_FORGRND, PAL_DSKTOP2, "inserting/deleting line.");
-			textOutShadow(228, 161, PAL_FORGRND, PAL_DSKTOP2, "Original FT2 About screen");
+			textOutShadow(228, 161, PAL_FORGRND, PAL_DSKTOP2, "Original FT2 pattern layout");
 
 			textOutShadow(428,  95, PAL_FORGRND, PAL_DSKTOP2, "Enable MIDI");
 			textOutShadow(412, 108, PAL_FORGRND, PAL_DSKTOP2, "Record MIDI chn.");
@@ -1406,7 +1398,7 @@ void showConfigScreen(void)
 			drawTextBox(TB_CONF_DEF_PATTS_DIR);
 			drawTextBox(TB_CONF_DEF_TRACKS_DIR);
 
-			setScrollBarPos(SB_MIDI_SENS, config.recMIDIVolSens, false);
+			setScrollBarPos(SB_MIDI_SENS, config.recMIDIVolSens, DONT_TRIGGER_CALLBACK);
 			showScrollBar(SB_MIDI_SENS);
 		}
 		break;
@@ -1450,6 +1442,7 @@ void hideConfigScreen(void)
 	hideRadioButtonGroup(RB_GROUP_CONFIG_AUDIO_FREQ);
 	hideRadioButtonGroup(RB_GROUP_CONFIG_AUDIO_INPUT_FREQ);
 	hideRadioButtonGroup(RB_GROUP_CONFIG_FREQ_SLIDES);
+	hideCheckBox(CB_CONF_PRECISE_BPM);
 	hideCheckBox(CB_CONF_VOL_RAMP);
 	hidePushButton(PB_CONFIG_AUDIO_RESCAN);
 	hidePushButton(PB_CONFIG_AUDIO_OUTPUT_DOWN);
@@ -1521,7 +1514,7 @@ void hideConfigScreen(void)
 	hideCheckBox(CB_CONF_REC_KEYOFF);
 	hideCheckBox(CB_CONF_QUANTIZATION);
 	hideCheckBox(CB_CONF_CHANGE_PATTLEN_INS_DEL);
-	hideCheckBox(CB_CONF_USE_OLD_ABOUT_SCREEN);
+	hideCheckBox(CB_CONF_ORIG_FT2_PATT_LAYOUT);
 	hideCheckBox(CB_CONF_MIDI_ENABLE);
 	hideCheckBox(CB_CONF_MIDI_REC_ALL);
 	hideCheckBox(CB_CONF_MIDI_REC_TRANS);
@@ -1547,7 +1540,7 @@ void hideConfigScreen(void)
 void exitConfigScreen(void)
 {
 	hideConfigScreen();
-	showTopScreen(true);
+	showTopScreen(RESTORE_SCREENS);
 }
 
 // CONFIG AUDIO
@@ -1660,13 +1653,6 @@ void rbConfigAudioIntrpCubic(void)
 	checkRadioButton(RB_CONFIG_AUDIO_INTRP_CUBIC);
 }
 
-void rbConfigAudioIntrpQuadratic(void)
-{
-	config.interpolation = INTERPOLATION_QUADRATIC;
-	audioSetInterpolationType(config.interpolation);
-	checkRadioButton(RB_CONFIG_AUDIO_INTRP_QUADRATIC);
-}
-
 void rbConfigAudioIntrpSinc8(void)
 {
 	config.interpolation = INTERPOLATION_SINC8;
@@ -1735,6 +1721,23 @@ void cbToggleAutoSaveConfig(void)
 {
 	config.cfg_AutoSave ^= 1;
 }
+
+void cbPreciseBPM(void)
+{
+	config.specialFlags2 ^= PRECISE_BPM;
+
+	if (config.specialFlags2 & PRECISE_BPM)
+		checkBoxes[CB_CONF_PRECISE_BPM].checked = true;
+	else
+		checkBoxes[CB_CONF_PRECISE_BPM].checked = false;
+
+	drawCheckBox(CB_CONF_PRECISE_BPM);
+
+	lockMixerCallback();
+	calcReplayerVars(FT2_REF_AUDIO_RATE, audio.freq);
+	unlockMixerCallback();
+}
+
 void cbConfigVolRamp(void)
 {
 	config.specialFlags ^= NO_VOLRAMP_FLAG;
@@ -1832,15 +1835,11 @@ void cbSoftwareMouse(void)
 		okBox(0, "System message", "Error: Couldn't create/show mouse cursor!", NULL);
 
 	if (config.specialFlags2 & HARDWARE_MOUSE)
-	{
 		checkBoxes[CB_CONF_SOFTWARE_MOUSE].checked = false;
-		drawCheckBox(CB_CONF_SOFTWARE_MOUSE);
-	}
 	else
-	{
 		checkBoxes[CB_CONF_SOFTWARE_MOUSE].checked = true;
-		drawCheckBox(CB_CONF_SOFTWARE_MOUSE);
-	}
+
+	drawCheckBox(CB_CONF_SOFTWARE_MOUSE);
 
 	if (config.specialFlags2 & HARDWARE_MOUSE)
 		SDL_ShowCursor(SDL_TRUE);
@@ -2104,9 +2103,10 @@ void cbChangePattLenInsDel(void)
 	config.recTrueInsert ^= 1;
 }
 
-void cbUseOldAboutScreen(void)
+void cbAltPatternLayout(void)
 {
-	config.useNewAboutScreen ^= 1;
+	config.ptnAlternativeLayout ^= 1;
+	redrawPatternEditor();
 }
 
 void cbMIDIEnable(void)

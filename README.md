@@ -1,6 +1,7 @@
-# ft2-clone-emscripten
-Fasttracker II clone for Windows/macOS/Linux/Web
-[Online demo](https://mdahlgrengadd.github.io/ft2-clone-emscripten)
+# ft2-clone
+Fasttracker II clone for Windows/macOS/Linux/WebAssembly
+
+Web build: https://dahlgrenmartin.github.io/ft2-clone-emscripten/
 
 Aims to be a highly accurate clone of the classic Fasttracker II software for MS-DOS. \
 The XM player itself has been directly ported from the original source code, for maximum accuracy. \
@@ -16,12 +17,12 @@ If these don't work for you, you'll have to compile the code manually.
 
 # Improvements over original DOS version
 - New sample editor features, like waveform generators and resonant filters
-- The channel resampler/mixer uses floating-point arithmetics for less errors, and has extra interpolation options (3-point quadratic spline, 4-point cubic spline, 8-point/16-point windowed-sinc)
-- The sample loader supports FLAC/AIFF/BRR (SNES) samples and more WAV types than original FT2. It will also attempt to tune the sample (finetune and rel. note) to its playback frequency on load.
+- The channel resampler/mixer uses floating-point arithmetics for less errors, and has extra interpolation options (4-point cubic spline and 8-point/16-point windowed-sinc)
+- The sample loader supports AIFF/FLAC/OGG/MP3/BRR (SNES) samples and more WAV types than original FT2. It will also attempt to tune the sample (finetune and rel. note) to its playback frequency on load.
 - It contains a new "Trim" feature, which will remove unused stuff to potentially make the module smaller
 - Drag n' drop of modules/samples
 - The waveform display in the sample editor shows peak based data when zoomed out
-- Text boxes has a text marking option, where you can cut/copy/paste
+- Textboxes have a text marking option, where you can cut/copy/paste
 - MOD/STM/S3M import has been slightly improved (S3M import is still not ideal, as it's not compatible with XM)
 - Supports loading DIGI Booster (non-Pro) modules
 - Supports loading Impulse Tracker modules (Awful support! Don't use this for playback)

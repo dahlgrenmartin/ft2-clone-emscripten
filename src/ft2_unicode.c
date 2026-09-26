@@ -3,6 +3,24 @@
 #include <crtdbg.h>
 #endif
 
+// for detecting if musl or glibc is used
+#if defined(__linux__)
+  /* Only Linux has glibc's <features.h>. On BSDs (including FreeBSD) and others,
+     skip this block to avoid a missing-header error. */
+  #ifdef __has_include
+    #if __has_include(<features.h>)
+      #include <features.h>
+    #endif
+  #else
+    /* If the compiler doesn't support __has_include, assume features.h exists on glibc. */
+    #include <features.h>
+  #endif
+  /* If <features.h> didn't define glibc's GNU extensions, assume musl. */
+  #ifndef __USE_GNU
+    #define __MUSL__
+  #endif
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
@@ -33,7 +51,7 @@ char *cp850ToUtf8(char *src)
 	if (reqSize <= 0)
 		return NULL;
 
-	wchar_t *w = (wchar_t *)malloc((reqSize + 1) * sizeof(wchar_t));
+	wchar_t *w = (wchar_t *)malloc((reqSize + 1) * sizeof (wchar_t));
 	if (w == NULL)
 		return NULL;
 
@@ -57,7 +75,7 @@ char *cp850ToUtf8(char *src)
 		return NULL;
 	}
 
-	char *x = (char *)malloc((reqSize + 1) * sizeof(char));
+	char *x = (char *)malloc((reqSize + 1) * sizeof (char));
 	if (x == NULL)
 	{
 		free(w);
@@ -91,7 +109,7 @@ UNICHAR *cp850ToUnichar(char *src)
 	if (reqSize <= 0)
 		return NULL;
 
-	UNICHAR *w = (wchar_t *)malloc((reqSize + 1) * sizeof(wchar_t));
+	UNICHAR *w = (wchar_t *)malloc((reqSize + 1) * sizeof (wchar_t));
 	if (w == NULL)
 		return NULL;
 
@@ -120,7 +138,7 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 	if (reqSize <= 0)
 		return NULL;
 
-	wchar_t *w = (wchar_t *)malloc((reqSize + 1) * sizeof(wchar_t));
+	wchar_t *w = (wchar_t *)malloc((reqSize + 1) * sizeof (wchar_t));
 	if (w == NULL)
 		return NULL;
 
@@ -147,7 +165,7 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 		return NULL;
 	}
 
-	char *x = (char *)malloc((reqSize + 1) * sizeof(char));
+	char *x = (char *)malloc((reqSize + 1) * sizeof (char));
 	if (x == NULL)
 	{
 		free(w);
@@ -172,8 +190,8 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 		{
 			const int8_t ch = (const int8_t)x[i];
 			if (ch != '\0' && ch < 32 &&
-				ch != -124 && ch != -108 && ch != -122 && ch != -114 && ch != -103 &&
-				ch != -113 && ch != -101 && ch != -99 && ch != -111 && ch != -110)
+			    ch != -124 && ch != -108 && ch != -122 && ch != -114 && ch != -103 &&
+			    ch != -113 && ch != -101 && ch != -99 && ch != -111 && ch != -110)
 			{
 				x[i] = ' '; // character not allowed, turn it into space
 			}
@@ -196,7 +214,7 @@ char *unicharToCp850(UNICHAR *src, bool removeIllegalChars)
 	if (reqSize <= 0)
 		return NULL;
 
-	char *x = (char *)malloc((reqSize + 1) * sizeof(char));
+	char *x = (char *)malloc((reqSize + 1) * sizeof (char));
 	if (x == NULL)
 		return NULL;
 
@@ -216,8 +234,8 @@ char *unicharToCp850(UNICHAR *src, bool removeIllegalChars)
 		{
 			const int8_t ch = (const int8_t)x[i];
 			if (ch != '\0' && ch < 32 &&
-				ch != -124 && ch != -108 && ch != -122 && ch != -114 && ch != -103 &&
-				ch != -113 && ch != -101 && ch != -99 && ch != -111 && ch != -110)
+			    ch != -124 && ch != -108 && ch != -122 && ch != -114 && ch != -103 &&
+			    ch != -113 && ch != -101 && ch != -99 && ch != -111 && ch != -110)
 			{
 				x[i] = ' '; // character not allowed, turn it into space
 			}
@@ -245,7 +263,7 @@ char *cp850ToUtf8(char *src)
 
 	size_t outLen = srcLen * 4; // should be sufficient
 
-	char *outBuf = (char *)calloc(outLen + 1, sizeof(char));
+	char *outBuf = (char *)calloc(outLen + 1, sizeof (char));
 	if (outBuf == NULL)
 		return NULL;
 
@@ -282,34 +300,27 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 		return NULL;
 
 #ifdef __EMSCRIPTEN__
-	// For Emscripten/WebAssembly, filenames are already in UTF-8
-	// and iconv is not available, so just make a copy of the string
-	char *outBuf = (char *)malloc((srcLen + 1) * sizeof(char));
+	char *outBuf = (char *)malloc(srcLen + 1);
 	if (outBuf == NULL)
 		return NULL;
-
-	strcpy(outBuf, src);
-
+	memcpy(outBuf, src, srcLen + 1);
 	if (removeIllegalChars)
 	{
-		// remove illegal characters (only allow certain nordic ones)
 		for (size_t i = 0; i < srcLen; i++)
 		{
 			const int8_t ch = (const int8_t)outBuf[i];
 			if (ch != '\0' && ch < 32)
-			{
-				outBuf[i] = ' '; // character not allowed, turn it into space
-			}
+				outBuf[i] = ' ';
 		}
 	}
-
 	return outBuf;
 #else
-	// Original iconv-based implementation for other Unix systems
 #ifdef __APPLE__
 	iconv_t cd = iconv_open("850//TRANSLIT//IGNORE", "UTF-8-MAC");
 #elif defined(__NetBSD__) || defined(__sun) || defined(sun)
 	iconv_t cd = iconv_open("850", "UTF-8");
+#elif defined(__MUSL__)
+	iconv_t cd = iconv_open("cp850", "UTF-8");
 #else
 	iconv_t cd = iconv_open("850//TRANSLIT//IGNORE", "UTF-8");
 #endif
@@ -318,7 +329,7 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 
 	size_t outLen = srcLen * 4; // should be sufficient
 
-	char *outBuf = (char *)calloc(outLen + 1, sizeof(char));
+	char *outBuf = (char *)calloc(outLen + 1, sizeof (char));
 	if (outBuf == NULL)
 		return NULL;
 
@@ -349,8 +360,8 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 		{
 			const int8_t ch = (const int8_t)outBuf[i];
 			if (ch != '\0' && ch < 32 &&
-				ch != -124 && ch != -108 && ch != -122 && ch != -114 && ch != -103 &&
-				ch != -113 && ch != -101 && ch != -99 && ch != -111 && ch != -110)
+			    ch != -124 && ch != -108 && ch != -122 && ch != -114 && ch != -103 &&
+			    ch != -113 && ch != -101 && ch != -99 && ch != -111 && ch != -110)
 			{
 				outBuf[i] = ' '; // character not allowed, turn it into space
 			}
@@ -358,6 +369,6 @@ char *utf8ToCp850(char *src, bool removeIllegalChars)
 	}
 
 	return outBuf;
-#endif
+#endif // __EMSCRIPTEN__
 }
 #endif

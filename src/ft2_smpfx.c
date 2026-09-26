@@ -229,6 +229,7 @@ void pbSfxTriangle(void)
 	resumeAudio();
 
 	updateSampleEditorSample();
+	setSongModifiedFlag();
 }
 
 void pbSfxSaw(void)
@@ -280,6 +281,7 @@ void pbSfxSaw(void)
 	resumeAudio();
 
 	updateSampleEditorSample();
+	setSongModifiedFlag();
 }
 
 void pbSfxSine(void)
@@ -327,6 +329,7 @@ void pbSfxSine(void)
 	resumeAudio();
 
 	updateSampleEditorSample();
+	setSongModifiedFlag();
 }
 
 void pbSfxSquare(void)
@@ -384,6 +387,7 @@ void pbSfxSquare(void)
 	resumeAudio();
 
 	updateSampleEditorSample();
+	setSongModifiedFlag();
 }
 
 void drawFilterResonance(void)
@@ -430,7 +434,7 @@ static void setupResoLpFilter(sample_t *s, resoFilter_t *f, double cutoff, uint3
 
 	if (!absoluteCutoff)
 	{
-		const double sampleFreq = getSampleC4Rate(s);
+		const double sampleFreq = getSampleC4Hz(s);
 		if (cutoff >= sampleFreq/2.0)
 			cutoff = (sampleFreq/2.0) - CUTOFF_EPSILON;
 
@@ -462,7 +466,7 @@ static void setupResoHpFilter(sample_t *s, resoFilter_t *f, double cutoff, uint3
 
 	if (!absoluteCutoff)
 	{
-		const double sampleFreq = getSampleC4Rate(s);
+		const double sampleFreq = getSampleC4Hz(s);
 		if (cutoff >= sampleFreq/2.0)
 			cutoff = (sampleFreq/2.0) - CUTOFF_EPSILON;
 
@@ -653,7 +657,8 @@ void pbSfxLowPass(void)
 	setupResoLpFilter(s, &f, lastLpCutoff, filterResonance, false);
 	fillSampleUndo(KEEP_SAMPLE_MARK);
 	applyResoFilter(s, &f);
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
+	setSongModifiedFlag();
 }
 
 void pbSfxHighPass(void)
@@ -685,7 +690,8 @@ void pbSfxHighPass(void)
 	setupResoHpFilter(s, &f, lastHpCutoff, filterResonance, false);
 	fillSampleUndo(KEEP_SAMPLE_MARK);
 	applyResoFilter(s, &f);
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
+	setSongModifiedFlag();
 }
 
 void sfxPreviewFilter(uint32_t cutoff)
@@ -752,7 +758,11 @@ void sfxPreviewFilter(uint32_t cutoff)
 	s->origDataPtr = sampleData;
 	s->length = len;
 	s->dataPtr = s->origDataPtr + SMP_DAT_OFFSET;
-	s->loopStart = s->loopLength = 0;
+	if (smpEd_Rx1 < smpEd_Rx2) // disable loop if previewing marked section
+	{
+		s->loopStart = 0;
+		s->loopLength = 0;
+	}
 	fixSample(s);
 
 	const int32_t oldX1 = smpEd_Rx1;
@@ -777,8 +787,8 @@ void sfxPreviewFilter(uint32_t cutoff)
 	ch->realVol = ch->outVol = ch->oldVol = 64;
 	updateVolPanAutoVib(ch);
 
-	while (ch->status & IS_Trigger); // wait for sample to latch in mixer
-	SDL_Delay(1500); // wait 1.5 seconds
+	while (ch->status & CS_TRIGGER_VOICE); // wait for voice to trigger in mixer
+	SDL_Delay(1000); // wait 1 second
 
 	// we're done, stop voice and free temporary data
 	pauseAudio();
@@ -802,7 +812,8 @@ void pbSfxSubBass(void)
 	setupResoHpFilter(s, &f, 0.001, 0, true);
 	fillSampleUndo(KEEP_SAMPLE_MARK);
 	applyResoFilter(s, &f);
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
+	setSongModifiedFlag();
 }
 
 void pbSfxAddBass(void)
@@ -965,7 +976,8 @@ void pbSfxAddBass(void)
 	fixSample(s);
 	resumeAudio();
 
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
+	setSongModifiedFlag();
 }
 
 void pbSfxSubTreble(void)
@@ -979,7 +991,8 @@ void pbSfxSubTreble(void)
 	setupResoLpFilter(s, &f, 0.33, 0, true);
 	fillSampleUndo(KEEP_SAMPLE_MARK);
 	applyResoFilter(s, &f);
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
+	setSongModifiedFlag();
 }
 
 void pbSfxAddTreble(void)
@@ -1142,7 +1155,8 @@ void pbSfxAddTreble(void)
 	fixSample(s);
 	resumeAudio();
 
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
+	setSongModifiedFlag();
 }
 
 void pbSfxSetAmp(void)
@@ -1218,7 +1232,8 @@ void pbSfxSetAmp(void)
 	fixSample(s);
 	resumeAudio();
 
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
+	setSongModifiedFlag();
 }
 
 void pbSfxUndo(void)
@@ -1247,6 +1262,7 @@ void pbSfxUndo(void)
 
 		fixSample(s);
 		resumeAudio();
+		setSongModifiedFlag();
 	}
 	else
 	{
@@ -1263,7 +1279,7 @@ void pbSfxUndo(void)
 	{
 		smpEd_Rx1 = oldRx1;
 		smpEd_Rx2 = oldRx2;
-		writeSample(false); // redraw sample mark only
+		writeSample(DONT_FORCE_SAMPLE_REDRAW); // redraw sample mark only
 	}
 
 	sampleUndo.keepSampleMark = false;

@@ -98,7 +98,7 @@ void killPatternIfUnused(uint16_t pattNum) // for tracker use only, not in loade
 
 uint8_t getMaxVisibleChannels(void)
 {
-	assert(config.ptnMaxChannels >= 0 && config.ptnMaxChannels <= 3);
+	ASSERT(config.ptnMaxChannels >= 0 && config.ptnMaxChannels <= 3);
 	if (config.ptnShowVolColumn)
 		return maxVisibleChans1[config.ptnMaxChannels];
 	else
@@ -110,7 +110,7 @@ void updatePatternWidth(void)
 	if (ui.numChannelsShown > ui.maxVisibleChannels)
 		ui.numChannelsShown = ui.maxVisibleChannels;
 
-	assert(ui.numChannelsShown >= 2 && ui.numChannelsShown <= 12);
+	ASSERT(ui.numChannelsShown >= 2 && ui.numChannelsShown <= 12);
 
 	ui.patternChannelWidth = chanWidths[(ui.numChannelsShown / 2) - 1] + 3;
 }
@@ -227,7 +227,7 @@ void showAdvEdit(void)
 		exitPatternEditorExtended();
 
 	hideTopScreen();
-	showTopScreen(false);
+	showTopScreen(DONT_RESTORE_SCREENS);
 
 	ui.advEditShown = true;
 	ui.scopesShown  = false;
@@ -299,7 +299,7 @@ void showTranspose(void)
 		exitPatternEditorExtended();
 
 	hideTopScreen();
-	showTopScreen(false);
+	showTopScreen(DONT_RESTORE_SCREENS);
 
 	ui.transposeShown = true;
 	ui.scopesShown = false;
@@ -364,7 +364,7 @@ void cursorChannelLeft(void)
 	{
 		cursor.ch = (uint8_t)(song.numChannels - 1);
 		if (ui.pattChanScrollShown)
-			setScrollBarPos(SB_CHAN_SCROLL, song.numChannels, true);
+			setScrollBarPos(SB_CHAN_SCROLL, song.numChannels, TRIGGER_CALLBACK);
 	}
 	else
 	{
@@ -385,7 +385,7 @@ void cursorChannelRight(void)
 	{
 		cursor.ch = 0;
 		if (ui.pattChanScrollShown)
-			setScrollBarPos(SB_CHAN_SCROLL, 0, true);
+			setScrollBarPos(SB_CHAN_SCROLL, 0, TRIGGER_CALLBACK);
 	}
 	else
 	{
@@ -683,7 +683,7 @@ void patternEditorExtended(void)
 
 	// kludge to fix scrollbar thumb when the scrollbar height changes during playback
 	if (songPlaying)
-		setScrollBarPos(SB_POS_ED, editor.songPos, false);
+		setScrollBarPos(SB_POS_ED, editor.songPos, DONT_TRIGGER_CALLBACK);
 }
 
 void exitPatternEditorExtended(void)
@@ -711,12 +711,12 @@ void exitPatternEditorExtended(void)
 	ui.wavRendererShown = ui._wavRendererShown;
 	ui.trimScreenShown = ui.trimScreenShown;
 
-	showTopScreen(true);
+	showTopScreen(RESTORE_SCREENS);
 	showBottomScreen();
 
 	// kludge to fix scrollbar thumb when the scrollbar height changes during playback
 	if (songPlaying)
-		setScrollBarPos(SB_POS_ED, editor.songPos, false);
+		setScrollBarPos(SB_POS_ED, editor.songPos, DONT_TRIGGER_CALLBACK);
 }
 
 void togglePatternEditorExtended(void)
@@ -764,7 +764,7 @@ void checkMarkLimits(void)
 
 static int8_t mouseXToCh(void) // used to get channel num from mouse x (for pattern marking)
 {
-	assert(ui.patternChannelWidth > 0);
+	ASSERT(ui.patternChannelWidth > 0);
 	if (ui.patternChannelWidth == 0)
 		return 0;
 
@@ -919,7 +919,7 @@ void handlePatternDataMouseDown(bool mouseButtonHeld)
 		if (mouse.y < y1)
 		{
 			if (editor.row > 0)
-				setPos(-1, editor.row - 1, true);
+				setSongPos(-1, editor.row - 1, RESET_SONG_TICK);
 
 			forceMarking = true;
 			ui.updatePatternEditor = true;
@@ -928,7 +928,7 @@ void handlePatternDataMouseDown(bool mouseButtonHeld)
 		{
 			const int16_t numRows = patternNumRows[editor.editPattern];
 			if (editor.row < numRows-1)
-				setPos(-1, editor.row + 1, true);
+				setSongPos(-1, editor.row + 1, RESET_SONG_TICK);
 
 			forceMarking = true;
 			ui.updatePatternEditor = true;
@@ -1450,7 +1450,7 @@ void setChannelScrollPos(uint32_t pos)
 
 	ui.channelOffset = (uint8_t)pos;
 
-	assert(song.numChannels > ui.numChannelsShown);
+	ASSERT(song.numChannels > ui.numChannelsShown);
 	if (ui.channelOffset >= song.numChannels-ui.numChannelsShown)
 		ui.channelOffset = (uint8_t)(song.numChannels-ui.numChannelsShown);
 
@@ -1479,7 +1479,7 @@ void jumpToChannel(uint8_t chNr) // for ALT+q..i ALT+a..k
 
 	if (ui.pattChanScrollShown)
 	{
-		assert(song.numChannels > ui.numChannelsShown);
+		ASSERT(song.numChannels > ui.numChannelsShown);
 
 		if (chNr >= ui.channelOffset+ui.numChannelsShown)
 			scrollBarScrollDown(SB_CHAN_SCROLL, (chNr - (ui.channelOffset + ui.numChannelsShown)) + 1);
@@ -1559,7 +1559,7 @@ void pbPosEdDel(void)
 
 	if (song.orders[song.songPos] != oldPattern)
 	{
-		setPos(song.songPos, -1, false);
+		setSongPos(song.songPos, -1, DONT_RESET_SONG_TICK);
 		ui.updatePatternEditor = true;
 	}
 
@@ -1667,7 +1667,7 @@ void pbPosEdLenDown(void)
 	if (song.songPos >= song.songLength)
 	{
 		song.songPos = song.songLength - 1;
-		setPos(song.songPos, -1, false);
+		setSongPos(song.songPos, -1, DONT_RESET_SONG_TICK);
 	}
 
 	ui.updatePosSections = true;
@@ -1843,7 +1843,7 @@ void pbAddChan(void)
 	song.numChannels += 2;
 
 	hideTopScreen();
-	showTopLeftMainScreen(true);
+	showTopLeftMainScreen(RESTORE_SCREENS);
 	showTopRightMainScreen();
 
 	if (ui.patternEditorShown)
@@ -1865,7 +1865,7 @@ void pbSubChan(void)
 	checkMarkLimits();
 
 	hideTopScreen();
-	showTopLeftMainScreen(true);
+	showTopLeftMainScreen(RESTORE_SCREENS);
 	showTopRightMainScreen();
 
 	if (ui.patternEditorShown)
@@ -2006,7 +2006,7 @@ void drawPosEdNums(int16_t songPos)
 		if (entry < 0)
 			continue;
 
-		assert(entry < 256);
+		ASSERT(entry < 256);
 
 		if (ui.extendedPatternEditor)
 		{
@@ -2020,7 +2020,7 @@ void drawPosEdNums(int16_t songPos)
 		}
 	}
 
-	assert(songPos < 256);
+	ASSERT(songPos < 256);
 
 	// middle
 	if (ui.extendedPatternEditor)
@@ -2155,13 +2155,13 @@ void drawGlobalVol(uint16_t val)
 	if (ui.extendedPatternEditor)
 		y = 56;
 
-	assert(val <= 64);
+	ASSERT(val <= 64);
 	textOutFixed(x, y, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[val]);
 }
 
 void drawIDAdd(void)
 {
-	assert(editor.editRowSkip <= 16);
+	ASSERT(editor.editRowSkip <= 16);
 	textOutFixed(152, 64, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[editor.editRowSkip]);
 }
 
@@ -2639,10 +2639,10 @@ static void zapSong(void)
 	resetChannels();
 	unlockMixerCallback();
 
-	setScrollBarPos(SB_POS_ED, 0, false);
+	setScrollBarPos(SB_POS_ED, 0, DONT_TRIGGER_CALLBACK);
 	setScrollBarEnd(SB_POS_ED, (song.songLength - 1) + 5);
 
-	updateWindowTitle(true);
+	resetDiskOpModuleFilename(); // also updates the window title
 }
 
 static void zapInstrs(void)
@@ -2672,18 +2672,18 @@ static void zapInstrs(void)
 
 void pbZap(void)
 {
-	const int16_t choice = okBox(3, "System request", "Total devastation of the...", NULL);
+	const int16_t choice = okBox(3, "System request", "What do you want to clear?", NULL);
 
-	if (choice == 1) // zap all
+	if (choice == 1) // "everything"
 	{
 		zapSong();
 		zapInstrs();
 	}
-	else if (choice == 2) // zap song
+	else if (choice == 2) // "song"
 	{
 		zapSong();
 	}
-	else if (choice == 3) // zap instruments
+	else if (choice == 3) // "instruments"
 	{
 		zapInstrs();
 	}
@@ -2692,7 +2692,7 @@ void pbZap(void)
 	{
 		// redraw top screens
 		hideTopScreen();
-		showTopScreen(true);
+		showTopScreen(RESTORE_SCREENS);
 
 		setSongModifiedFlag();
 	}
@@ -2726,7 +2726,7 @@ void resetChannelOffset(void)
 	ui.pattChanScrollShown = song.numChannels > getMaxVisibleChannels();
 	cursor.object = CURSOR_NOTE;
 	cursor.ch = 0;
-	setScrollBarPos(SB_CHAN_SCROLL, 0, true);
+	setScrollBarPos(SB_CHAN_SCROLL, 0, TRIGGER_CALLBACK);
 	ui.channelOffset = 0;
 }
 

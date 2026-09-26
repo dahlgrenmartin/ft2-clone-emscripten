@@ -141,8 +141,19 @@ static char *getMidiInDeviceName(uint32_t deviceID)
 	if (midiInDev == NULL)
 		return NULL; // MIDI not initialized
 
-	char *devStr = (char *)rtmidi_get_port_name(midiInDev, deviceID);
-	if (devStr == NULL || !midiInDev->ok)
+	// get string length
+	int32_t reqStrLen = 0;
+	rtmidi_get_port_name(midiInDev, deviceID, NULL, &reqStrLen);
+	if (!midiInDev->ok)
+		return NULL;
+
+	// allocate memory
+	char *devStr = (char *)malloc(reqStrLen+1);
+	if (devStr == NULL)
+		return NULL;
+
+	rtmidi_get_port_name(midiInDev, deviceID, devStr, &reqStrLen);
+	if (!midiInDev->ok)
 		return NULL;
 
 	return devStr;
@@ -392,7 +403,7 @@ void rescanMidiInputDevices(void)
 	}
 
 	setScrollBarEnd(SB_MIDI_INPUT_SCROLL, midi.numInputDevices);
-	setScrollBarPos(SB_MIDI_INPUT_SCROLL, 0, false);
+	setScrollBarPos(SB_MIDI_INPUT_SCROLL, 0, DONT_TRIGGER_CALLBACK);
 }
 
 void drawMidiInputList(void)

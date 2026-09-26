@@ -5,13 +5,13 @@
 
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <time.h>
 #include <math.h> // modf()
 #ifdef _WIN32
 #define WIN32_MEAN_AND_LEAN
 #include <windows.h>
-#ifndef __EMSCRIPTEN__
 #include <SDL2/SDL_syswm.h>
-#endif
 #else
 #include <unistd.h> // chdir()
 #endif
@@ -51,6 +51,22 @@ static void disableWasapi(void);
 
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32 // test for SSE/SSE2 presence very first, to make sure no SSE/SSE2 code is attempted to be ran
+	if (!SDL_HasSSE())
+	{
+		MessageBoxA(NULL, "Your computer's processor doesn't have the SSE instruction set " \
+			"which is needed for this program to run. Sorry!", "Error", MB_ICONEXCLAMATION);
+		return 0;
+	}
+
+	if (!SDL_HasSSE2())
+	{
+		MessageBoxA(NULL, "Your computer's processor doesn't have the SSE2 instruction set " \
+			"which is needed for this program to run. Sorry!", "Error", MB_ICONEXCLAMATION);
+		return 0;
+	}
+#endif
+
 #if defined _WIN32 || defined __APPLE__
 	SDL_version sdlVer;
 #endif
@@ -77,21 +93,23 @@ int main(int argc, char *argv[])
 	if (sdlVer.major != SDL_MAJOR_VERSION || sdlVer.minor != SDL_MINOR_VERSION || sdlVer.patch != SDL_PATCHLEVEL)
 	{
 #ifdef _WIN32
-		showErrorMsgBox("SDL2.dll is not the expected version, the program will terminate.\n\n"
-						"Loaded dll version: %d.%d.%d\n"
-						"Required (compiled with) version: %d.%d.%d\n\n",
-						sdlVer.major, sdlVer.minor, sdlVer.patch,
-						SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL);
+		showErrorMsgBox("SDL2.dll is not the expected version, the program will terminate.\n\n" \
+		                "Loaded dll version: %d.%d.%d\n" \
+		                "Required (compiled with) version: %d.%d.%d\n\n",
+		                sdlVer.major, sdlVer.minor, sdlVer.patch,
+		                SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL);
 #else
-		showErrorMsgBox("The loaded SDL2 library is not the expected version, the program will terminate.\n\n"
-						"Loaded library version: %d.%d.%d\n"
-						"Required (compiled with) version: %d.%d.%d",
-						sdlVer.major, sdlVer.minor, sdlVer.patch,
-						SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL);
+		showErrorMsgBox("The loaded SDL2 library is not the expected version, the program will terminate.\n\n" \
+		                "Loaded library version: %d.%d.%d\n" \
+		                "Required (compiled with) version: %d.%d.%d",
+		                sdlVer.major, sdlVer.minor, sdlVer.patch,
+		                SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_PATCHLEVEL);
 #endif
 		return 0;
 	}
 #endif
+
+	hpc_Init();
 
 	// ALT+F4 is used in FT2, but is "close program" in some cases...
 #if SDL_MINOR_VERSION >= 24 || (SDL_MINOR_VERSION == 0 && SDL_PATCHLEVEL >= 4)
@@ -103,22 +121,8 @@ int main(int argc, char *argv[])
 	SetProcessDPIAware();
 #endif
 
-	if (!cpu.hasSSE)
-	{
-		showErrorMsgBox("Your computer's processor doesn't have the SSE instruction set\n"
-						"which is needed for this program to run. Sorry!");
-		return 0;
-	}
-
-	if (!cpu.hasSSE2)
-	{
-		showErrorMsgBox("Your computer's processor doesn't have the SSE2 instruction set\n"
-						"which is needed for this program to run. Sorry!");
-		return 0;
-	}
-
 	disableWasapi(); // disable problematic WASAPI SDL2 audio driver on Windows (causes clicks/pops sometimes...)
-					 // 13.03.2020: This is still needed with SDL 2.0.12...
+	                 // 13.03.2020: This is still needed with SDL 2.0.12...
 #endif
 
 	/* SDL 2.0.9 for Windows has a serious bug where you need to initialize the joystick subsystem
@@ -136,6 +140,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
+	SDL_SetHint("SDL_MOUSE_FOCUS_CLICKTHROUGH", "1");
 	SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
 
 	/* Text input is started by default in SDL2, turn it off to remove ~2ms spikes per key press.
@@ -144,13 +149,12 @@ int main(int argc, char *argv[])
 	*/
 	SDL_StopTextInput();
 
-	hpc_Init();
 	hpc_SetDurationInHz(&video.vblankHpc, VBLANK_HZ);
 
 #ifdef __APPLE__
 	osxSetDirToProgramDirFromArgs(argv);
 #endif
-	if (!setupExecutablePath() || !loadBMPs() || !setupQuadraticSplineTable() || !setupCubicSplineTable() || !setupWindowedSincTables())
+	if (!setupExecutablePath() || !loadBMPs() || !setupWindowedSincTables())
 	{
 		cleanUpAndExit();
 		return 1;
@@ -193,7 +197,7 @@ int main(int argc, char *argv[])
 			// nope, try safe values (44.1kHz 16-bit @ 1024 samples)
 			config.audioFreq = 44100;
 			config.specialFlags &= ~(BITDEPTH_32 + BUFFSIZE_512 + BUFFSIZE_2048);
-			config.specialFlags |= (BITDEPTH_16 + BUFFSIZE_1024);
+			config.specialFlags |=  (BITDEPTH_16 + BUFFSIZE_1024);
 
 			if (!setupAudio(CONFIG_SHOW_ERRORS)) // this time it surely must work?!
 			{
@@ -224,18 +228,14 @@ int main(int argc, char *argv[])
 	}
 
 #ifdef HAS_MIDI
-#ifdef __APPLE__
-	// MIDI init can take several seconds on Mac, use thread
-	midi.initMidiThread = SDL_CreateThread(initMidiFunc, NULL, NULL);
+	// MIDI init can take several seconds, use thread
+	midi.initMidiThread = SDL_CreateThread(initMidiFunc, "MIDI init thread", NULL);
 	if (midi.initMidiThread == NULL)
 	{
 		showErrorMsgBox("Couldn't create MIDI initialization thread!");
 		cleanUpAndExit();
 		return 1;
 	}
-#else
-	initMidiFunc(NULL);
-#endif
 #endif
 
 	hpc_ResetCounters(&video.vblankHpc); // quirk: this is needed for potential okBox() calls in handleModuleLoadFromArg()
@@ -251,7 +251,7 @@ int main(int argc, char *argv[])
 		readInput();
 		handleEvents();
 #ifdef __EMSCRIPTEN__
-		updateScopesFromMainThread(); // Update scopes in main thread for web version
+		updateScopesFromMainThread();
 #endif
 		handleRedrawing();
 		flipFrame();
@@ -267,21 +267,22 @@ int main(int argc, char *argv[])
 
 static void initializeVars(void)
 {
-	cpu.hasSSE = SDL_HasSSE();
-	cpu.hasSSE2 = SDL_HasSSE2();
+	srand((uint32_t)time(NULL));
 
 	// clear common structs
 #ifdef HAS_MIDI
-	memset(&midi, 0, sizeof(midi));
+	memset(&midi, 0, sizeof (midi));
 #endif
-	memset(&video, 0, sizeof(video));
-	memset(&keyb, 0, sizeof(keyb));
-	memset(&mouse, 0, sizeof(mouse));
-	memset(&editor, 0, sizeof(editor));
-	memset((void *)&pattMark, 0, sizeof(pattMark));
-	memset(&pattSync, 0, sizeof(pattSync));
-	memset(&chSync, 0, sizeof(chSync));
-	memset(&song, 0, sizeof(song));
+	memset(&video, 0, sizeof (video));
+	memset(&keyb, 0, sizeof (keyb));
+	memset(&mouse, 0, sizeof (mouse));
+	memset(&editor, 0, sizeof (editor));
+	memset((void *)&pattMark, 0, sizeof (pattMark));
+	memset(&pattSync, 0, sizeof (pattSync));
+	memset(&chSync, 0, sizeof (chSync));
+	memset(&song, 0, sizeof (song));
+
+	calcMiscReplayerVars();
 
 	// used for scopes and sampling position line (sampler screen)
 	for (int32_t i = 0; i < MAX_CHANNELS; i++)
@@ -308,7 +309,7 @@ static void initializeVars(void)
 	editor.srcInstr = 1;
 	editor.curInstr = 1;
 	editor.curOctave = 4;
-	editor.smpEd_NoteNr = 1 + NOTE_C4;
+	editor.smpEd_NoteNr = 1+NOTE_C4;
 
 	editor.ptnJumpPos[0] = 0x00;
 	editor.ptnJumpPos[1] = 0x10;
@@ -316,13 +317,12 @@ static void initializeVars(void)
 	editor.ptnJumpPos[3] = 0x30;
 
 	editor.copyMaskEnable = true;
-	memset(editor.copyMask, 1, sizeof(editor.copyMask));
-	memset(editor.pasteMask, 1, sizeof(editor.pasteMask));
+	memset(editor.copyMask, 1, sizeof (editor.copyMask));
+	memset(editor.pasteMask, 1, sizeof (editor.pasteMask));
 
 	editor.diskOpReadOnOpen = true;
 
 	audio.linearPeriodsFlag = true;
-	calcReplayerLogTab();
 
 #ifdef HAS_MIDI
 	midi.enable = true;
@@ -334,17 +334,15 @@ static void initializeVars(void)
 static void cleanUpAndExit(void) // never call this inside the main loop!
 {
 #ifdef HAS_MIDI
-#ifdef __APPLE__
-	// on Mac we used a thread to init MIDI (as it could take several seconds)
+	// we used a thread to init MIDI (as it could take several seconds)
 	if (midi.initMidiThread != NULL)
 	{
 		SDL_WaitThread(midi.initMidiThread, NULL);
 		midi.initMidiThread = NULL;
 	}
-#endif
+
 	midi.enable = false; // stop MIDI callback from doing things
-	while (midi.callbackBusy)
-		SDL_Delay(1); // wait for MIDI callback to finish
+	while (midi.callbackBusy) SDL_Delay(10); // wait for MIDI callback to finish
 
 	closeMidiInDevice();
 	freeMidiIn();
@@ -375,7 +373,6 @@ static void cleanUpAndExit(void) // never call this inside the main loop!
 	freeTextBoxes();
 	freeMouseCursors();
 	freeBMPs();
-	freeScopeIntrpLUT();
 
 	if (editor.audioDevConfigFileLocationU != NULL)
 	{
@@ -426,7 +423,7 @@ static void osxSetDirToProgramDirFromArgs(char **argv)
 				}
 			}
 
-			chdir(tmpPath);		// path to binary
+			chdir(tmpPath); // path to binary
 			chdir("../../../"); // we should now be in the directory where the config can be
 
 			free(tmpPath);

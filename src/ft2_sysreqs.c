@@ -1,4 +1,5 @@
 #include <stdio.h> // vsnprintf()
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "ft2_config.h"
@@ -24,7 +25,8 @@ int16_t (*loaderSysReq)(int16_t, const char *, const char *, void (*)(void));
 
 #define NUM_SYSREQ_TYPES 7
 
-static char *buttonText[NUM_SYSREQ_TYPES][5] =
+#define MAX_PUSHBUTTONS 5
+static char *buttonText[NUM_SYSREQ_TYPES][MAX_PUSHBUTTONS] =
 {
 	// generic dialogs
 	{ "OK", "","","","" },
@@ -32,8 +34,8 @@ static char *buttonText[NUM_SYSREQ_TYPES][5] =
 	{ "Yes", "No", "","","" },
 
 	// custom dialogs
-	{ "All", "Song", "Instruments", "Cancel", "" },   // "song clear" dialog
-	{ "Read left", "Read right", "Convert", "", "" }, // "stereo sample loader" dialog
+	{ "Everything", "Song", "Instruments", "Cancel", "" },   // "song clear" dialog
+	{ "Left channel", "Right channel", "Mix to mono", "", "" }, // "stereo sample loader" dialog
 	{ "Mono", "Stereo", "Cancel", "","" },            // "audio sampling" dialog
 	{ "OK", "Preview", "Cancel", "","" }              // sample editor effects filters
 };
@@ -46,7 +48,7 @@ static SDL_Keycode shortCut[NUM_SYSREQ_TYPES][5] =
 	{ SDLK_y, SDLK_n, 0,      0,      0 },
 
 	// custom dialogs
-	{ SDLK_a, SDLK_s, SDLK_i, SDLK_c, 0 }, // "song clear" dialog
+	{ SDLK_e, SDLK_s, SDLK_i, SDLK_c, 0 }, // "song clear" dialog
 	{ SDLK_l, SDLK_r, SDLK_c, 0,      0 }, // "stereo sample loader" dialog 
 	{ SDLK_m, SDLK_s, SDLK_c, 0,      0 }, // "audio sampling" dialog
 	{ SDLK_o, SDLK_p, SDLK_c, 0,      0 }  // sample editor effects filters
@@ -189,8 +191,9 @@ static bool mouseButtonUpLogic(uint8_t mouseButton)
 // If the checkBoxCallback argument is set, then you get a "Do not show again" checkbox.
 int16_t okBox(int16_t type, const char *headline, const char *text, void (*checkBoxCallback)(void))
 {
-#define PUSHBUTTON_W 80
+#define DEFAULT_PUSHBUTTON_WIDTH 80
 
+	pushButton_t *p;
 	SDL_Event inputEvent;
 
 	if (editor.editTextFlag)
@@ -216,8 +219,11 @@ int16_t okBox(int16_t type, const char *headline, const char *text, void (*check
 
 	// count number of buttons
 	uint16_t numButtons = 0;
-	while (buttonText[type][numButtons][0] != '\0' && numButtons < 5)
-		numButtons++;
+	for (int32_t i = 0; i < MAX_PUSHBUTTONS; i++)
+	{
+		if (buttonText[type][i][0] != '\0')
+			numButtons++;
+	}
 
 	uint16_t tlen = textWidth(text);
 	uint16_t hlen = textWidth(headline);
@@ -241,16 +247,24 @@ int16_t okBox(int16_t type, const char *headline, const char *text, void (*check
 	// the dialog's y position differs in extended pattern editor mode
 	const uint16_t y = ui.extendedPatternEditor ? SYSTEM_REQUEST_Y_EXT : SYSTEM_REQUEST_Y;
 
-	// set up buttons
-	for (uint16_t i = 0; i < numButtons; i++)
+	// find widest button size
+	uint16_t buttonWidthHi = DEFAULT_PUSHBUTTON_WIDTH;
+	for (int32_t i = 0; i < numButtons; i++)
 	{
-		pushButton_t *p = &pushButtons[i];
+		uint16_t buttonWidth = textWidth(buttonText[type][i]) + 10;
+		if (buttonWidth > buttonWidthHi)
+			buttonWidthHi = buttonWidth;
+	}
 
+	// set up buttons
+	p = pushButtons;
+	for (uint16_t i = 0; i < numButtons; i++, p++)
+	{
+		p->caption = buttonText[type][i];
 		p->x = ((SCREEN_W - tx) / 2) + (i * 100);
 		p->y = y + 42;
-		p->w = PUSHBUTTON_W;
+		p->w = buttonWidthHi;
 		p->h = 16;
-		p->caption = buttonText[type][i];
 		p->visible = true;
 	}
 
@@ -308,6 +322,7 @@ int16_t okBox(int16_t type, const char *headline, const char *text, void (*check
 					returnVal = 1;
 					ui.sysReqShown = false;
 					keyb.ignoreCurrKeyUp = true; // don't handle key up event for any keys that were pressed
+					keyb.ignoreNoteEnterKey = true; // yet another kludge (prevent sample trigger)
 				}
 
 				for (uint16_t i = 0; i < numButtons; i++)
@@ -447,10 +462,12 @@ int16_t inputBox(int16_t type, const char *headline, char *edText, uint16_t maxS
 	uint16_t wlen = textWidth(headline);
 	const uint16_t headlineX = (SCREEN_W - wlen) / 2;
 
-	// count number of buttons
 	uint16_t numButtons = 0;
-	while (buttonText[type][numButtons][0] != '\0' && numButtons < 5)
-		numButtons++;
+	for (int32_t i = 0; i < MAX_PUSHBUTTONS; i++)
+	{
+		if (buttonText[type][i][0] != '\0')
+			numButtons++;
+	}
 
 	uint16_t tx = TEXTBOX_W;
 	if (tx > wlen)
@@ -550,6 +567,7 @@ int16_t inputBox(int16_t type, const char *headline, char *edText, uint16_t maxS
 					returnVal = 1;
 					ui.sysReqShown = false;
 					keyb.ignoreCurrKeyUp = true; // don't handle key up event for any keys that were pressed
+					keyb.ignoreNoteEnterKey = true; // yet another kludge (prevent sample trigger)
 				}
 
 				if (editor.editTextFlag)

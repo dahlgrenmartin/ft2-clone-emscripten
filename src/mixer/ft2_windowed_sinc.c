@@ -1,24 +1,99 @@
-// 8-point/16-point windowed-sinc interpolation LUT generator
+// polyphase windowed-sinc LUT generator
 
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <math.h>
-#include "ft2_windowed_sinc.h" // SINCx_WIDTH, SINCx_PHASES
-#include "../ft2_header.h" // PI
+#include "../ft2_header.h"
 #include "../ft2_video.h" // showErrorMsgBox()
+#include "ft2_windowed_sinc.h"
+
+typedef struct
+{
+	double kaiserBeta, sincCutoff;
+} sincKernel_t;
+
+static sincKernel_t sincKernelConfig[SINC_KERNELS] =
+{
+	/* These parameters have been borrowed from the OpenMPT project
+	** (with cutoff edit for kernel #1).
+	**
+	** It's quite difficult to tweak these numbers without causing either
+	** ringing or aliasing in some cases. If anyone has good experience on
+	** designing low-tap windowed-sinc kernels for a use case like this, and
+	** knows of a good way to figure out what numbers to use here, PLEASE
+	** contact me (contact details can be found at the bottom of 16-bits.org).
+	*/
+
+	// beta,  cutoff
+	{ 9.6377, 1.000 }, // kernel #1
+	{ 8.5000, 0.500 }, // kernel #2
+	{ 7.0000, 0.425 }  // kernel #3
+};
 
 // globalized
-float *fSinc8_1 = NULL, *fSinc8_2 = NULL, *fSinc8_3 = NULL;
-float *fSinc16_1 = NULL, *fSinc16_2 = NULL, *fSinc16_3 = NULL;
-float *fSinc_1 = NULL, *fSinc_2 = NULL, *fSinc_3 = NULL;
+float *fSinc[SINC_KERNELS], *fSinc8[SINC_KERNELS], *fSinc16[SINC_KERNELS];
 uint64_t sincRatio1, sincRatio2;
+// ----------
+
+static bool calcPolyphaseSincLUT(float *fOut, int32_t numTaps, int32_t numPhases, double kaiserBeta, double sincCutoff);
+
+bool setupWindowedSincTables(void)
+{
+	sincKernel_t *k = sincKernelConfig;
+	for (int32_t i = 0; i < SINC_KERNELS; i++, k++)
+	{
+		// (+1 comes from the need for an additional phase for interpolation)
+		 fSinc8[i] = (float *)malloc((SINC_OVERSAMPLING+1) *  SINC8_TAPS * sizeof (float));
+		fSinc16[i] = (float *)malloc((SINC_OVERSAMPLING+1) * SINC16_TAPS * sizeof (float));
+
+		if (fSinc8[i] == NULL || fSinc16[i] == NULL)
+		{
+			showErrorMsgBox("Not enough memory!");
+			return false;
+		}
+
+		if (!calcPolyphaseSincLUT(fSinc8[i], SINC8_TAPS, SINC_OVERSAMPLING, k->kaiserBeta, k->sincCutoff))
+		{
+			showErrorMsgBox("Not enough memory!");
+			return false;
+		}
+
+		if (!calcPolyphaseSincLUT(fSinc16[i], SINC16_TAPS, SINC_OVERSAMPLING, k->kaiserBeta, k->sincCutoff))
+		{
+			showErrorMsgBox("Not enough memory!");
+			return false;
+		}
+	}
+
+	// fixed-point resampling ratios for sinc kernel selection (to get a gradual cut-off curve)
+	sincRatio1 = (uint64_t)(1.1875 * MIXER_FRAC_SCALE); // fSinc[0] if <=
+	sincRatio2 = (uint64_t)(1.5000 * MIXER_FRAC_SCALE); // fSinc[1] if <=, else fSinc[2] if >
+
+	return true;
+}
+
+void freeWindowedSincTables(void)
+{
+	for (int32_t i = 0; i < SINC_KERNELS; i++)
+	{
+		if (fSinc8[i] != NULL)
+		{
+			free(fSinc8[i]);
+			fSinc8[i] = NULL;
+		}
+
+		if (fSinc16[i] != NULL)
+		{
+			free(fSinc16[i]);
+			fSinc16[i] = NULL;
+		}
+	}
+}
 
 // zeroth-order modified Bessel function of the first kind (series approximation)
-static inline double besselI0(double z)
+static double besselI0(double z)
 {
-#define EPSILON (1E-12) /* verified: lower than this makes no change when LUT output is single-precision float */
-
 	double s = 1.0, ds = 1.0, d = 2.0;
 	const double zz = z * z;
 
@@ -28,25 +103,12 @@ static inline double besselI0(double z)
 		s += ds;
 		d += 2.0;
 	}
-	while (ds > s*EPSILON);
+	while (ds > s*(1E-12));
 
 	return s;
 }
 
-static inline double sinc(double x)
-{
-	if (x == 0.0)
-	{
-		return 1.0;
-	}
-	else
-	{
-		x *= PI;
-		return sin(x) / x;
-	}
-}
-
-static inline double sincWithCutoff(double x, const double cutoff)
+static double sinc(double x, double cutoff)
 {
 	if (x == 0.0)
 	{
@@ -59,134 +121,52 @@ static inline double sincWithCutoff(double x, const double cutoff)
 	}
 }
 
-static void generateWindowedSinc(float *fOutput, const int32_t filterWidth, const int32_t filterPhases, const double beta, const double cutoff)
+/* Polyphase sinc LUT generator w/ Kaiser-Bessel window.
+**
+** Note #1: The 'sincCutoff' parameter ranges from 0.0 to 1.0, where 1.0 is no cutoff.
+** Note #2: The 'numTaps' parameter must be an even number.
+*/
+static bool calcPolyphaseSincLUT(float *fOut, int32_t numTaps, int32_t numPhases, double kaiserBeta, double sincCutoff)
 {
-	const int32_t filterWidthBits = (int32_t)log2(filterWidth);
-	const int32_t filterWidthMask = filterWidth - 1;
-	const int32_t filterCenter = (filterWidth / 2) - 1;
-	const double besselI0Beta = 1.0 / besselI0(beta);
-	const double phaseMul = 1.0 / filterPhases;
-	const double xMul = 1.0 / (filterWidth / 2);
-
-	if (cutoff < 1.0)
-	{
-		// windowed-sinc with frequency cutoff
-		for (int32_t i = 0; i < filterPhases * filterWidth; i++)
-		{
-			const double x = ((i & filterWidthMask) - filterCenter) - ((i >> filterWidthBits) * phaseMul);
-
-			// Kaiser-Bessel window
-			const double n = x * xMul;
-			const double window = besselI0(beta * sqrt(1.0 - n * n)) * besselI0Beta;
-
-			fOutput[i] = (float)(sincWithCutoff(x, cutoff) * window);
-		}
-	}
-	else
-	{
-		// windowed-sinc with no frequency cutoff
-		for (int32_t i = 0; i < filterPhases * filterWidth; i++)
-		{
-			const double x = ((i & filterWidthMask) - filterCenter) - ((i >> filterWidthBits) * phaseMul);
-
-			// Kaiser-Bessel window
-			const double n = x * xMul;
-			const double window = besselI0(beta * sqrt(1.0 - n * n)) * besselI0Beta;
-
-			fOutput[i] = (float)(sinc(x) * window);
-		}
-	}
-}
-
-bool setupWindowedSincTables(void)
-{
-	fSinc8_1  = (float *)malloc(SINC1_WIDTH*SINC1_PHASES * sizeof (float));
-	fSinc8_2  = (float *)malloc(SINC1_WIDTH*SINC1_PHASES * sizeof (float));
-	fSinc8_3  = (float *)malloc(SINC1_WIDTH*SINC1_PHASES * sizeof (float));
-	fSinc16_1 = (float *)malloc(SINC2_WIDTH*SINC2_PHASES * sizeof (float));
-	fSinc16_2 = (float *)malloc(SINC2_WIDTH*SINC2_PHASES * sizeof (float));
-	fSinc16_3 = (float *)malloc(SINC2_WIDTH*SINC2_PHASES * sizeof (float));
-
-	if (fSinc8_1  == NULL || fSinc8_2  == NULL || fSinc8_3  == NULL ||
-		fSinc16_1 == NULL || fSinc16_2 == NULL || fSinc16_3 == NULL)
-	{
-		showErrorMsgBox("Not enough memory!");
+	double *tapBuffer = (double *)malloc(numTaps * sizeof (double));
+	if (tapBuffer == NULL)
 		return false;
+
+	const double besselI0BetaMul = 1.0 / besselI0(kaiserBeta);
+	const int32_t centerPoint = (numTaps / 2) - 1;
+	const double phaseMul = 1.0 / numPhases;
+	const double kaiserXMul = 1.0 / (numTaps / 2);
+
+	float *fOutPtr = fOut;
+	for (int32_t i = 0; i < numPhases; i++)
+	{
+		const double phase = i * phaseMul;
+
+		double tapSum = 0.0;
+		for (int32_t j = 0; j < numTaps; j++)
+		{
+			const double x = (j - centerPoint) - phase;
+
+			// Kaiser-Bessel window
+			const double n = x * kaiserXMul;
+			const double window = besselI0(kaiserBeta * sqrt(1.0 - n * n)) * besselI0BetaMul;
+
+			const double wsinc = sinc(x, sincCutoff) * window;
+			tapBuffer[j] = wsinc;
+
+			tapSum += wsinc;
+		}
+
+		// normalize for unity gain before storing taps
+		const double tapMul = 1.0 / tapSum;
+		for (int32_t j = 0; j < numTaps; j++)
+			*fOutPtr++ = (float)(tapBuffer[j] * tapMul);
 	}
 
-	// LUT-select resampling ratios
-	const double ratio1 = 1.1875; // fSinc_1 if <=
-	const double ratio2 = 1.5; // fSinc_2 if <=, fSinc_3 if >
+	// store inverted copy of first phase after end of LUT (for interpolation look-up)
+	for (int32_t i = 0; i < numTaps; i++)
+		*fOutPtr++ = fOut[(numTaps-1) - i];
 
-	// calculate mixer delta limits for LUT-selector
-	sincRatio1 = (uint64_t)(ratio1 * MIXER_FRAC_SCALE);
-	sincRatio2 = (uint64_t)(ratio2 * MIXER_FRAC_SCALE);
-
-	/* Kaiser-Bessel beta parameter
-	**
-	** Basically;
-	** Lower beta = less treble cut off, but more aliasing (shorter main lobe, more side lobe ripple)
-	** Higher beta = more treble cut off, but less aliasing (wider main lobe, less side lobe ripple)
-	**
-	** There simply isn't any optimal value here, it has to be tweaked to personal preference.
-	*/
-	const double b1 = 3.0 * M_PI; // alpha = 3.00 (beta = ~9.425)
-	const double b2 = 8.5;
-	const double b3 = 7.3;
-
-	// sinc low-pass cutoff (could maybe use some further tweaking)
-	const double c1 = 1.000;
-	const double c2 = 0.500;
-	const double c3 = 0.425;
-
-	// 8 point
-	generateWindowedSinc(fSinc8_1,  SINC1_WIDTH, SINC1_PHASES, b1, c1);
-	generateWindowedSinc(fSinc8_2,  SINC1_WIDTH, SINC1_PHASES, b2, c2);
-	generateWindowedSinc(fSinc8_3,  SINC1_WIDTH, SINC1_PHASES, b3, c3);
-
-	// 16 point
-	generateWindowedSinc(fSinc16_1, SINC2_WIDTH, SINC2_PHASES, b1, c1);
-	generateWindowedSinc(fSinc16_2, SINC2_WIDTH, SINC2_PHASES, b2, c2);
-	generateWindowedSinc(fSinc16_3, SINC2_WIDTH, SINC2_PHASES, b3, c3);
-
+	free(tapBuffer);
 	return true;
-}
-
-void freeWindowedSincTables(void)
-{
-	if (fSinc8_1 != NULL)
-	{
-		free(fSinc8_1);
-		fSinc8_1 = NULL;
-	}
-
-	if (fSinc8_2 != NULL)
-	{
-		free(fSinc8_2);
-		fSinc8_2 = NULL;
-	}
-
-	if (fSinc8_3 != NULL)
-	{
-		free(fSinc8_3);
-		fSinc8_3 = NULL;
-	}
-
-	if (fSinc16_1 != NULL)
-	{
-		free(fSinc16_1);
-		fSinc16_1 = NULL;
-	}
-
-	if (fSinc16_2 != NULL)
-	{
-		free(fSinc16_2);
-		fSinc16_2 = NULL;
-	}
-
-	if (fSinc16_3 != NULL)
-	{
-		free(fSinc16_3);
-		fSinc16_3 = NULL;
-	}
 }

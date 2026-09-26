@@ -37,9 +37,8 @@ typedef struct stmHdr_t
 	char name[20], sig[8];
 	uint8_t x1A, type;
 	uint8_t verMajor, verMinor;
-	uint8_t tempo, numPatterns, volume, reserved[13];
+	uint8_t tempo, numPatterns, masterVol, reserved[13];
 	stmSmpHdr_t smp[31];
-	uint8_t orders[128];
 }
 #ifdef __GNUC__
 __attribute__ ((packed))
@@ -50,59 +49,69 @@ stmHdr_t;
 #endif
 
 static const uint8_t stmEfx[16] = { 0, 0, 11, 0, 10, 2, 1, 3, 4, 7, 0, 5, 6, 0, 0, 0 };
-static uint8_t pattBuff[64*4*4];
 
 static uint16_t stmTempoToBPM(uint8_t tempo);
 
 bool loadSTM(FILE *f, uint32_t filesize)
 {
-	int16_t i, j, k;
-	stmHdr_t hdr;
+	stmHdr_t header;
 
 	tmpLinearPeriodsFlag = false; // use Amiga periods
 
-	if (filesize < sizeof (hdr))
+	if (filesize < sizeof (header))
 	{
 		loaderMsgBox("Error: This file is either not a module, or is not supported.");
 		return false;
 	}
 
-	if (fread(&hdr, 1, sizeof (hdr), f) != sizeof (hdr))
+	if (fread(&header, 1, sizeof (header), f) != sizeof (header))
 	{
 		loaderMsgBox("Error: This file is either not a module, or is not supported.");
 		return false;
 	}
 
-	if (hdr.verMinor == 0 || hdr.type != 2)
+	if (header.type != 2)
 	{
 		loaderMsgBox("Error loading STM: Incompatible module!");
 		return false;
 	}
 
 	songTmp.numChannels = 4;
-	memcpy(songTmp.orders, hdr.orders, 128);
 
-	i = 0;
-	while (i < 128 && songTmp.orders[i] < 99)
-		i++;
-	songTmp.songLength = i + (i == 0);
+	uint8_t maxOrders = (header.verMinor == 0) ? 64 : 128;
+	fread(songTmp.orders, 1, maxOrders, f);
 
-	if (songTmp.songLength < 255)
-		memset(&songTmp.orders[songTmp.songLength], 0, 256 - songTmp.songLength);
+	// count number of orders (song length)
+	songTmp.songLength = 0;
+	for (int32_t i = 0; i < maxOrders; i++)
+	{
+		if (songTmp.orders[i] >= 99)
+			break;
 
-	memcpy(songTmp.name, hdr.name, 20);
+		songTmp.songLength++;
+	}
 
-	uint8_t tempo = hdr.tempo;
-	if (hdr.verMinor < 21)
+	if (songTmp.songLength == 0)
+		songTmp.songLength = 1;
+
+	// clear unused orders
+	memset(&songTmp.orders[songTmp.songLength], 0, 256 - songTmp.songLength);
+
+	memcpy(songTmp.name, header.name, 20);
+
+	uint8_t tempo = header.tempo;
+	if (header.verMinor < 21)
 		tempo = ((tempo / 10) << 4) + (tempo % 10);
 
 	if (tempo == 0)
 		tempo = 96;
 
 	songTmp.BPM = stmTempoToBPM(tempo);
-	songTmp.speed = hdr.tempo >> 4;
+	songTmp.speed = header.tempo >> 4;
 
-	for (i = 0; i < hdr.numPatterns; i++)
+	// patterns
+
+	for (int32_t i = 0; i < header.numPatterns; i++)
 	{
 		if (!allocateTmpPatt(i, 64))
 		{
@@ -110,18 +119,14 @@ bool loadSTM(FILE *f, uint32_t filesize)
 			return false;
 		}
 
-		if (fread(pattBuff, 64 * 4 * 4, 1, f) != 1)
-		{
-			loaderMsgBox("General I/O error during loading!");
-			return false;
-		}
+		fread(tmpBuffer, 1, 64 * 4 * 4, f);
+		uint8_t *pattPtr = tmpBuffer;
 
-		uint8_t *pattPtr = pattBuff;
-		for (j = 0; j < 64; j++)
+		for (int32_t row = 0; row < 64; row++)
 		{
-			for (k = 0; k < 4; k++, pattPtr += 4)
+			for (int32_t ch = 0; ch < 4; ch++, pattPtr += 4)
 			{
-				note_t *p = &patternTmp[i][(j * MAX_CHANNELS) + k];
+				note_t *p = &patternTmp[i][(row * MAX_CHANNELS) + ch];
 				
 				if (pattPtr[0] == 254)
 				{
@@ -147,24 +152,27 @@ bool loadSTM(FILE *f, uint32_t filesize)
 				p->efxData = pattPtr[3];
 
 				uint8_t efx = pattPtr[2] & 0x0F;
-				if (efx == 1)
+				if (efx == 1) // set speed
 				{
 					p->efx = 15;
 
-					if (hdr.verMinor < 21)
+					if (header.verMinor < 21)
 						p->efxData = ((p->efxData / 10) << 4) + (p->efxData % 10);
-					
+
 					p->efxData >>= 4;
+					if (p->efxData == 0)
+						p->efx = 0;
 				}
-				else if (efx == 3)
+				else if (efx == 3) // pattern break
 				{
 					p->efx = 13;
 					p->efxData = 0;
 				}
 				else if (efx == 2 || (efx >= 4 && efx <= 12))
 				{
-					p->efx = stmEfx[efx];
-					if (p->efx == 0xA)
+					p->efx = stmEfx[efx]; // convert to XM effect
+
+					if (p->efx == 0xA) // volume slide
 					{
 						if (p->efxData & 0x0F)
 							p->efxData &= 0x0F;
@@ -178,59 +186,63 @@ bool loadSTM(FILE *f, uint32_t filesize)
 				}
 			}
 		}
-
-		if (tmpPatternEmpty(i))
-		{
-			if (patternTmp[i] != NULL)
-			{
-				free(patternTmp[i]);
-				patternTmp[i] = NULL;
-			}
-		}
 	}
 
-	for (i = 0; i < 31; i++)
+	// samples
+
+	stmSmpHdr_t *srcSmp = header.smp;
+	for (int32_t i = 0; i < 31; i++, srcSmp++)
 	{
-		memcpy(&songTmp.instrName[1+i], hdr.smp[i].name, 12);
+		memcpy(&songTmp.instrName[1+i], srcSmp->name, 12);
 
-		if (hdr.smp[i].length > 0)
+		if (srcSmp->length > 0)
 		{
-			allocateTmpInstr(1 + i);
+			if (!allocateTmpInstr(1 + i))
+			{
+				loaderMsgBox("Not enough memory!");
+				return false;
+			}
 			setNoEnvelope(instrTmp[i]);
-
 			sample_t *s = &instrTmp[1+i]->smp[0];
 
-			if (!allocateSmpData(s, hdr.smp[i].length, false))
+			memcpy(s->name, srcSmp->name, 12);
+
+			// non-FT2: fixes "acidlamb.stm" and other broken STMs
+			const uint32_t offsetInFile = (uint32_t)ftell(f);
+			if (offsetInFile+srcSmp->length > filesize)
+				srcSmp->length = (uint16_t)(filesize - offsetInFile);
+
+			if (!allocateSmpData(s, srcSmp->length, false))
 			{
 				loaderMsgBox("Not enough memory!");
 				return false;
 			}
 
-			s->length = hdr.smp[i].length;
-			s->volume = hdr.smp[i].volume;
-			s->loopStart = hdr.smp[i].loopStart;
-			s->loopLength = hdr.smp[i].loopEnd - hdr.smp[i].loopStart;
+			s->length = srcSmp->length;
+			s->volume = srcSmp->volume;
+			s->loopStart = srcSmp->loopStart;
+			s->loopLength = srcSmp->loopEnd - srcSmp->loopStart;
+			setSampleC4Hz(s, srcSmp->midCFreq);
 
-			memcpy(s->name, hdr.smp[i].name, 12);
-			setSampleC4Hz(s, hdr.smp[i].midCFreq);
-
-			if (s->loopStart < s->length && hdr.smp[i].loopEnd > s->loopStart && hdr.smp[i].loopEnd != 0xFFFF)
+			if (s->loopStart < s->length && srcSmp->loopEnd > s->loopStart && srcSmp->loopEnd != 0xFFFF)
 			{
 				if (s->loopStart+s->loopLength > s->length)
 					s->loopLength = s->length - s->loopStart;
 
-				s->flags |= LOOP_FWD; // enable loop
+				s->flags |= LOOP_FORWARD;
 			}
 			else
 			{
-				s->loopStart = 0;
-				s->loopLength = 0;
+				s->loopStart = s->loopLength = 0;
 			}
 
-			if (fread(s->dataPtr, s->length, 1, f) != 1)
+			if (offsetInFile < filesize)
 			{
-				loaderMsgBox("General I/O error during loading! Possibly corrupt module?");
-				return false;
+				if (fread(s->dataPtr, s->length, 1, f) != 1)
+				{
+					loaderMsgBox("General I/O error during loading! Possibly corrupt module?");
+					return false;
+				}
 			}
 		}
 	}

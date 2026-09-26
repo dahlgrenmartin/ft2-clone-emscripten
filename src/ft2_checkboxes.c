@@ -16,6 +16,7 @@
 #include "ft2_bmp.h"
 #include "ft2_wav_renderer.h"
 #include "ft2_smpfx.h"
+#include "ft2_diskop.h"
 #include "ft2_structs.h"
 
 checkBox_t checkBoxes[NUM_CHECKBOXES] =
@@ -87,6 +88,7 @@ checkBox_t checkBoxes[NUM_CHECKBOXES] =
 	// ------ CONFIG CHECKBOXES ------
 	//x,   y,   w,   h,  funcOnUp
 	{   3,  91,  77, 12, cbToggleAutoSaveConfig },
+	{ 389, 158,  89, 12, cbPreciseBPM },
 	{ 512, 158, 107, 12, cbConfigVolRamp },
 	{ 113,  14, 108, 12, cbConfigPattStretch },
 	{ 113,  27, 117, 12, cbConfigHexCount },
@@ -99,6 +101,7 @@ checkBox_t checkBoxes[NUM_CHECKBOXES] =
 	{ 237, 108,  13, 12, cbEnableCustomPointer },
 	{ 255, 158, 111, 12, cbSoftwareMouse },
 	// ---------------------------------
+	//x,   y,   w,   h,  funcOnUp
 	{ 212,   2, 150, 12, cbSampCutToBuff },
 	{ 212,  15, 153, 12, cbPattCutToBuff },
 	{ 212,  28, 159, 12, cbKillNotesAtStop },
@@ -109,7 +112,7 @@ checkBox_t checkBoxes[NUM_CHECKBOXES] =
 	{ 212, 107, 143, 12, cbRecKeyOff },
 	{ 212, 120,  89, 12, cbQuantization },
 	{ 212, 133, 180, 24, cbChangePattLenInsDel },
-	{ 212, 159, 169, 12, cbUseOldAboutScreen },
+	{ 212, 159, 174, 12, cbAltPatternLayout },
 	{ 411,  93,  83, 12, cbMIDIEnable },
 	{ 530, 106,  29, 12, cbMIDIRecAllChn },
 	{ 411, 119, 121, 12, cbMIDIRecTransp },
@@ -120,16 +123,20 @@ checkBox_t checkBoxes[NUM_CHECKBOXES] =
 	{ 113, 141,  75, 12, cbStretchImage },
 	{ 113, 154,  78, 12, cbPixelFilter },
 
+	// DISK OP. CHECKBOXES
+	//x,  y,   w,  h,  funcOnUp
+	{ 70, 106, 58, 12, cbDiskOpAllFiles },
+
 	// WAV RENDERER BPM MODE
 	//x,   y,   w,   h,  funcOnUp
-	{   3, 112,  71, 24, cbToggleWavRenderBPMMode }
+	{ 62, 157,  159, 12, cbToggleWavRenderIndividualTracks }
 };
 
 void drawCheckBox(uint16_t checkBoxID)
 {
 	const uint8_t *gfxPtr;
 
-	assert(checkBoxID < NUM_CHECKBOXES);
+	ASSERT(checkBoxID < NUM_CHECKBOXES);
 	checkBox_t *checkBox = &checkBoxes[checkBoxID];
 	if (!checkBox->visible)
 		return;
@@ -150,21 +157,21 @@ void drawCheckBox(uint16_t checkBoxID)
 
 void showCheckBox(uint16_t checkBoxID)
 {
-	assert(checkBoxID < NUM_CHECKBOXES);
+	ASSERT(checkBoxID < NUM_CHECKBOXES);
 	checkBoxes[checkBoxID].visible = true;
 	drawCheckBox(checkBoxID);
 }
 
 void hideCheckBox(uint16_t checkBoxID)
 {
-	assert(checkBoxID < NUM_CHECKBOXES);
+	ASSERT(checkBoxID < NUM_CHECKBOXES);
 	checkBoxes[checkBoxID].state = 0;
 	checkBoxes[checkBoxID].visible = false;
 }
 
 void handleCheckBoxesWhileMouseDown(void)
 {
-	assert(mouse.lastUsedObjectID >= 0 && mouse.lastUsedObjectID < NUM_CHECKBOXES);
+	ASSERT(mouse.lastUsedObjectID >= 0 && mouse.lastUsedObjectID < NUM_CHECKBOXES);
 	checkBox_t *checkBox = &checkBoxes[mouse.lastUsedObjectID];
 	if (!checkBox->visible)
 		return;
@@ -226,7 +233,7 @@ void testCheckBoxMouseRelease(void)
 	if (mouse.lastUsedObjectType != OBJECT_CHECKBOX || mouse.lastUsedObjectID == OBJECT_ID_NONE)
 		return;
 
-	assert(mouse.lastUsedObjectID < NUM_CHECKBOXES);
+	ASSERT(mouse.lastUsedObjectID < NUM_CHECKBOXES);
 	checkBox_t *checkBox = &checkBoxes[mouse.lastUsedObjectID];
 	if (!checkBox->visible)
 		return;

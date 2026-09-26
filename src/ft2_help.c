@@ -264,7 +264,7 @@ static void readHelp(void) // this is a bit messy...
 
 static void bigTextOutHalf(uint16_t xPos, uint16_t yPos, uint8_t paletteIndex, bool lowerHalf, const char *textPtr)
 {
-	assert(textPtr != NULL);
+	ASSERT(textPtr != NULL);
 
 	uint16_t currX = xPos;
 	while (true)
@@ -430,7 +430,7 @@ void hideHelpScreen(void)
 void exitHelpScreen(void)
 {
 	hideHelpScreen();
-	showTopScreen(true);
+	showTopScreen(RESTORE_SCREENS);
 }
 
 static void setHelpSubject(uint8_t Nr)
@@ -439,7 +439,7 @@ static void setHelpSubject(uint8_t Nr)
 	fHlp_Line = 0;
 
 	setScrollBarEnd(SB_HELP_SCROLL, subjLen[fHlp_Num]);
-	setScrollBarPos(SB_HELP_SCROLL, 0, false);
+	setScrollBarPos(SB_HELP_SCROLL, 0, DONT_TRIGGER_CALLBACK);
 }
 
 void rbHelpFeatures(void)

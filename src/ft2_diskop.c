@@ -24,6 +24,7 @@
 #endif
 #include <unistd.h>
 #include <dirent.h>
+#include <errno.h>
 #endif
 #include <wchar.h>
 #include <sys/stat.h>
@@ -46,7 +47,7 @@
 
 // hide POSIX warnings for chdir()
 #ifdef _MSC_VER
-#pragma warning(disable : 4996)
+#pragma warning(disable: 4996)
 #endif
 
 #define FILENAME_TEXT_X 170
@@ -92,7 +93,7 @@ static void setDiskOpItem(uint8_t item);
 
 bool setupExecutablePath(void)
 {
-	editor.binaryPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof(UNICHAR));
+	editor.binaryPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
 	if (editor.binaryPathU == NULL)
 	{
 		showErrorMsgBox("Not enough memory!");
@@ -129,7 +130,7 @@ int32_t getFileSize(UNICHAR *fileNameU) // returning -1 = filesize over 2GB
 
 	if (fSize > INT32_MAX)
 		return -1; // -1 = ">2GB" flag
-
+	
 	return (int32_t)fSize;
 }
 
@@ -159,10 +160,11 @@ void updateCurrSongFilename(void) // for window title
 
 // drive buttons for Windows
 #ifdef _WIN32
-static char logicalDriveNames[26][3] =
-	{
-		"A:", "B:", "C:", "D:", "E:", "F:", "G:", "H:", "I:", "J:", "K:", "L:", "M:",
-		"N:", "O:", "P:", "Q:", "R:", "S:", "T:", "U:", "V:", "W:", "X:", "Y:", "Z:"};
+static char logicalDriveNames[26][3] = 
+{
+	"A:", "B:", "C:", "D:", "E:", "F:", "G:", "H:", "I:", "J:", "K:", "L:", "M:",
+	"N:", "O:", "P:", "Q:", "R:", "S:", "T:", "U:", "V:", "W:", "X:", "Y:", "Z:"
+};
 static uint32_t numLogicalDrives;
 static uint32_t driveIndexes[DISKOP_MAX_DRIVE_BUTTONS];
 #endif
@@ -293,87 +295,47 @@ void freeDiskOp(void)
 		editor.tmpInstrFilenameU = NULL;
 	}
 
-	if (modTmpFName != NULL)
-	{
-		free(modTmpFName);
-		modTmpFName = NULL;
-	}
-	if (insTmpFName != NULL)
-	{
-		free(insTmpFName);
-		insTmpFName = NULL;
-	}
-	if (smpTmpFName != NULL)
-	{
-		free(smpTmpFName);
-		smpTmpFName = NULL;
-	}
-	if (patTmpFName != NULL)
-	{
-		free(patTmpFName);
-		patTmpFName = NULL;
-	}
-	if (trkTmpFName != NULL)
-	{
-		free(trkTmpFName);
-		trkTmpFName = NULL;
-	}
-	if (FReq_NameTemp != NULL)
-	{
-		free(FReq_NameTemp);
-		FReq_NameTemp = NULL;
-	}
-	if (FReq_ModCurPathU != NULL)
-	{
-		free(FReq_ModCurPathU);
-		FReq_ModCurPathU = NULL;
-	}
-	if (FReq_InsCurPathU != NULL)
-	{
-		free(FReq_InsCurPathU);
-		FReq_InsCurPathU = NULL;
-	}
-	if (FReq_SmpCurPathU != NULL)
-	{
-		free(FReq_SmpCurPathU);
-		FReq_SmpCurPathU = NULL;
-	}
-	if (FReq_PatCurPathU != NULL)
-	{
-		free(FReq_PatCurPathU);
-		FReq_PatCurPathU = NULL;
-	}
-	if (FReq_TrkCurPathU != NULL)
-	{
-		free(FReq_TrkCurPathU);
-		FReq_TrkCurPathU = NULL;
-	}
-	if (modTmpFNameUTF8 != NULL)
-	{
-		free(modTmpFNameUTF8);
-		modTmpFNameUTF8 = NULL;
-	}
+	if (modTmpFName != NULL) { free(modTmpFName); modTmpFName = NULL; }
+	if (insTmpFName != NULL) { free(insTmpFName); insTmpFName = NULL; }
+	if (smpTmpFName != NULL) { free(smpTmpFName); smpTmpFName = NULL; }
+	if (patTmpFName != NULL) { free(patTmpFName); patTmpFName = NULL; }
+	if (trkTmpFName != NULL) { free(trkTmpFName); trkTmpFName = NULL; }
+	if (FReq_NameTemp != NULL) { free(FReq_NameTemp); FReq_NameTemp = NULL; }
+	if (FReq_ModCurPathU != NULL) { free(FReq_ModCurPathU); FReq_ModCurPathU = NULL; }
+	if (FReq_InsCurPathU != NULL) { free(FReq_InsCurPathU); FReq_InsCurPathU = NULL; }
+	if (FReq_SmpCurPathU != NULL) { free(FReq_SmpCurPathU); FReq_SmpCurPathU = NULL; }
+	if (FReq_PatCurPathU != NULL) { free(FReq_PatCurPathU); FReq_PatCurPathU = NULL; }
+	if (FReq_TrkCurPathU != NULL) { free(FReq_TrkCurPathU); FReq_TrkCurPathU = NULL; }
+	if (modTmpFNameUTF8 != NULL) { free(modTmpFNameUTF8); modTmpFNameUTF8 = NULL; }
 
 	freeDirRecBuffer();
 }
 
+void resetDiskOpModuleFilename(void)
+{
+	modTmpFName[0] = '\0';
+	strcpy(modTmpFName, "untitled.xm");
+	updateCurrSongFilename(); // for window title
+	updateWindowTitle(true);
+}
+
 bool setupDiskOp(void)
 {
-	modTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof(char));
-	insTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof(char));
-	smpTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof(char));
-	patTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof(char));
-	trkTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof(char));
-	FReq_NameTemp = (char *)malloc((PATH_MAX + 1) * sizeof(char));
+	modTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
+	insTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
+	smpTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
+	patTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
+	trkTmpFName = (char *)malloc((PATH_MAX + 1) * sizeof (char));
+	FReq_NameTemp = (char *)malloc((PATH_MAX + 1) * sizeof (char));
 
-	FReq_ModCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof(UNICHAR));
-	FReq_InsCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof(UNICHAR));
-	FReq_SmpCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof(UNICHAR));
-	FReq_PatCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof(UNICHAR));
-	FReq_TrkCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof(UNICHAR));
+	FReq_ModCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
+	FReq_InsCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
+	FReq_SmpCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
+	FReq_PatCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
+	FReq_TrkCurPathU = (UNICHAR *)malloc((PATH_MAX + 1) * sizeof (UNICHAR));
 
-	if (modTmpFName == NULL || insTmpFName == NULL || smpTmpFName == NULL ||
-		patTmpFName == NULL || trkTmpFName == NULL || FReq_NameTemp == NULL ||
+	if (modTmpFName      == NULL || insTmpFName      == NULL || smpTmpFName      == NULL ||
+		patTmpFName      == NULL || trkTmpFName      == NULL || FReq_NameTemp    == NULL ||
 		FReq_ModCurPathU == NULL || FReq_InsCurPathU == NULL || FReq_SmpCurPathU == NULL ||
 		FReq_PatCurPathU == NULL || FReq_TrkCurPathU == NULL)
 	{
@@ -383,7 +345,6 @@ bool setupDiskOp(void)
 	}
 
 	// clear first entry of strings
-	modTmpFName[0] = '\0';
 	insTmpFName[0] = '\0';
 	smpTmpFName[0] = '\0';
 	patTmpFName[0] = '\0';
@@ -395,49 +356,24 @@ bool setupDiskOp(void)
 	FReq_PatCurPathU[0] = 0;
 	FReq_TrkCurPathU[0] = 0;
 
-	strcpy(modTmpFName, "untitled.xm");
+	resetDiskOpModuleFilename();
 	strcpy(insTmpFName, "untitled.xi");
 	strcpy(smpTmpFName, "untitled.wav");
 	strcpy(patTmpFName, "untitled.xp");
 	strcpy(trkTmpFName, "untitled.xt");
 
 	setupInitialPaths();
-
 #ifdef __EMSCRIPTEN__
-	// For Emscripten, set a better default directory to avoid root directory with embedded files
-	// Always set up a safe directory for Emscripten, regardless of current path
-	EM_ASM(
-		try {
-			FS.mkdir('/home');
-		} catch(e){
-			// /home already exists
-		});
-
-	EM_ASM(
-		try {
-			FS.mkdir('/home/web_user');
-		} catch(e){
-			// /home/web_user already exists
-		});
-
-	// Change to the safe directory
+	EM_ASM({
+		try { FS.mkdir('/home'); } catch (e) {}
+		try { FS.mkdir('/home/web_user'); } catch (e) {}
+	});
 	if (chdir("/home/web_user") == 0)
-	{
-		strcpy(FReq_ModCurPathU, "/home/web_user");
-	}
-	else
-	{
-		if (chdir("/home") == 0)
-		{
-			strcpy(FReq_ModCurPathU, "/home");
-		}
-	}
+		UNICHAR_STRCPY(FReq_ModCurPathU, "/home/web_user");
+	else if (chdir("/home") == 0)
+		UNICHAR_STRCPY(FReq_ModCurPathU, "/home");
 #endif
-
 	setDiskOpItem(0);
-
-	updateCurrSongFilename(); // for window title
-	updateWindowTitle(true);
 
 	return true;
 }
@@ -445,17 +381,11 @@ bool setupDiskOp(void)
 #ifdef __EMSCRIPTEN__
 void syncPersistentStorage(bool load)
 {
-	EM_ASM_ARGS({
-		var loadFromStorage = !!$0;
-		console.log(loadFromStorage ? 'Loading from persistent storage...' : 'Saving to persistent storage...');
-		
-		FS.syncfs(loadFromStorage, function(err) {
-			if (err) {
-				console.error('Persistent storage sync error:', err);
-			} else {
-				console.log('Persistent storage sync completed successfully');
-			}
-		}); }, load);
+	EM_ASM({
+		FS.syncfs(!!$0, function(err) {
+			if (err) console.error('Persistent storage sync error:', err);
+		});
+	}, load);
 }
 #endif
 
@@ -482,7 +412,7 @@ static void removeQuestionmarksFromString(char *s)
 	for (int32_t i = 0; i < len; i++)
 	{
 		if (s[i] == '?')
-			s[i] = ' ';
+			s[i] = ' ' ;
 	}
 }
 
@@ -504,7 +434,7 @@ static bool deleteDirRecursive(UNICHAR *strU)
 {
 	SHFILEOPSTRUCTW shfo;
 
-	memset(&shfo, 0, sizeof(shfo));
+	memset(&shfo, 0, sizeof (shfo));
 	shfo.wFunc = FO_DELETE;
 	shfo.fFlags = FOF_SILENT | FOF_NOERRORUI | FOF_NOCONFIRMATION;
 	shfo.pFrom = strU;
@@ -543,7 +473,7 @@ static void setupDiskOpDrives(void) // Windows only
 
 	// get number of drives and drive names
 	const uint32_t drivesBitmask = GetLogicalDrives();
-	for (int32_t i = 0; i < 8 * sizeof(uint32_t); i++)
+	for (int32_t i = 0; i < 8*sizeof (uint32_t); i++)
 	{
 		if ((drivesBitmask & (1 << i)) != 0)
 		{
@@ -603,7 +533,7 @@ static bool deleteDirRecursive(UNICHAR *strU)
 {
 #ifndef __EMSCRIPTEN__
 	FTSENT *curr;
-	char *files[] = {(char *)(strU), NULL};
+	char *files[] = { (char *)(strU), NULL };
 
 	FTS *ftsp = fts_open(files, FTS_NOCHDIR | FTS_PHYSICAL | FTS_XDEV, NULL);
 	if (!ftsp)
@@ -614,29 +544,29 @@ static bool deleteDirRecursive(UNICHAR *strU)
 	{
 		switch (curr->fts_info)
 		{
-		default:
-		case FTS_NS:
-		case FTS_DNR:
-		case FTS_ERR:
-			ret = false;
-			break;
-
-		case FTS_D:
-		case FTS_DC:
-		case FTS_DOT:
-		case FTS_NSOK:
-			break;
-
-		case FTS_DP:
-		case FTS_F:
-		case FTS_SL:
-		case FTS_SLNONE:
-		case FTS_DEFAULT:
-		{
-			if (remove(curr->fts_accpath) < 0)
+			default:
+			case FTS_NS:
+			case FTS_DNR:
+			case FTS_ERR:
 				ret = false;
-		}
-		break;
+			break;
+
+			case FTS_D:
+			case FTS_DC:
+			case FTS_DOT:
+			case FTS_NSOK:
+				break;
+
+			case FTS_DP:
+			case FTS_F:
+			case FTS_SL:
+			case FTS_SLNONE:
+			case FTS_DEFAULT:
+			{
+				if (remove(curr->fts_accpath) < 0)
+					ret = false;
+			}
+			break;
 		}
 	}
 
@@ -645,9 +575,7 @@ static bool deleteDirRecursive(UNICHAR *strU)
 
 	return ret;
 #else
-	// Emscripten version - simplified file deletion
-	// In web environment, complex directory traversal is not needed
-	return (remove((char *)strU) == 0);
+	return remove((char *)strU) == 0;
 #endif
 }
 
@@ -714,7 +642,7 @@ static char *getFilenameFromPath(char *p)
 		return p;
 
 	const int32_t len = (int32_t)strlen(p);
-	if (len < 2 || p[len - 1] == DIR_DELIMITER)
+	if (len < 2 || p[len-1] == DIR_DELIMITER)
 		return p;
 
 	// search for last directory delimiter
@@ -725,7 +653,7 @@ static char *getFilenameFromPath(char *p)
 	}
 
 	if (i != 0)
-		p += i + 1; // we found a directory delimiter - skip to the last one
+		p += i+1; // we found a directory delimiter - skip to the last one
 
 	return p;
 }
@@ -763,46 +691,46 @@ void diskOpSetFilename(uint8_t type, UNICHAR *pathU)
 
 	switch (type)
 	{
-	default:
-	case DISKOP_ITEM_MODULE:
-	{
-		strcpy(modTmpFName, filename);
-		updateCurrSongFilename(); // for window title
+		default:
+		case DISKOP_ITEM_MODULE:
+		{
+			strcpy(modTmpFName, filename);
+			updateCurrSongFilename(); // for window title
 
-		if (editor.moduleSaveMode == MOD_SAVE_MODE_MOD)
-			changeFilenameExt(modTmpFName, ".mod", PATH_MAX);
-		else if (editor.moduleSaveMode == MOD_SAVE_MODE_XM)
-			changeFilenameExt(modTmpFName, ".xm", PATH_MAX);
-		else if (editor.moduleSaveMode == MOD_SAVE_MODE_WAV)
-			changeFilenameExt(modTmpFName, ".wav", PATH_MAX);
+			if (editor.moduleSaveMode == MOD_SAVE_MODE_MOD)
+				changeFilenameExt(modTmpFName, ".mod", PATH_MAX);
+			else if (editor.moduleSaveMode == MOD_SAVE_MODE_XM)
+				changeFilenameExt(modTmpFName, ".xm", PATH_MAX);
+			else if (editor.moduleSaveMode == MOD_SAVE_MODE_WAV)
+				changeFilenameExt(modTmpFName, ".wav", PATH_MAX);
 
-		updateWindowTitle(true);
-	}
-	break;
-
-	case DISKOP_ITEM_INSTR:
-		strcpy(insTmpFName, filename);
+			updateWindowTitle(true);
+		}
 		break;
 
-	case DISKOP_ITEM_SAMPLE:
-	{
-		strcpy(smpTmpFName, filename);
-
-		if (editor.sampleSaveMode == SMP_SAVE_MODE_RAW)
-			changeFilenameExt(smpTmpFName, ".raw", PATH_MAX);
-		else if (editor.sampleSaveMode == SMP_SAVE_MODE_IFF)
-			changeFilenameExt(smpTmpFName, ".iff", PATH_MAX);
-		else if (editor.sampleSaveMode == SMP_SAVE_MODE_WAV)
-			changeFilenameExt(smpTmpFName, ".wav", PATH_MAX);
-	}
-	break;
-
-	case DISKOP_ITEM_PATTERN:
-		strcpy(patTmpFName, filename);
+		case DISKOP_ITEM_INSTR:
+			strcpy(insTmpFName, filename);
 		break;
 
-	case DISKOP_ITEM_TRACK:
-		strcpy(trkTmpFName, filename);
+		case DISKOP_ITEM_SAMPLE:
+		{
+			strcpy(smpTmpFName, filename);
+
+			if (editor.sampleSaveMode == SMP_SAVE_MODE_RAW)
+				changeFilenameExt(smpTmpFName, ".raw", PATH_MAX);
+			else if (editor.sampleSaveMode == SMP_SAVE_MODE_IFF)
+				changeFilenameExt(smpTmpFName, ".iff", PATH_MAX);
+			else if (editor.sampleSaveMode == SMP_SAVE_MODE_WAV)
+				changeFilenameExt(smpTmpFName, ".wav", PATH_MAX);
+		}
+		break;
+
+		case DISKOP_ITEM_PATTERN:
+			strcpy(patTmpFName, filename);
+		break;
+
+		case DISKOP_ITEM_TRACK:
+			strcpy(trkTmpFName, filename);
 		break;
 	}
 
@@ -812,7 +740,7 @@ void diskOpSetFilename(uint8_t type, UNICHAR *pathU)
 		drawTextBox(TB_DISKOP_FILENAME);
 }
 
-static void openFile(UNICHAR *filenameU, bool songModifiedCheck)
+static void openFile(UNICHAR *filenameU)
 {
 	// first check if we can actually open the requested file
 	FILE *f = UNICHAR_FOPEN(filenameU, "rb");
@@ -830,7 +758,7 @@ static void openFile(UNICHAR *filenameU, bool songModifiedCheck)
 		return;
 	}
 
-	if (filesize >= 128L * 1024 * 1024) // 128MB
+	if (filesize >= 128L*1024*1024) // 128MB
 	{
 		if (okBox(2, "System request", "Are you sure you want to load such a big file?", NULL) != 1)
 			return;
@@ -839,38 +767,38 @@ static void openFile(UNICHAR *filenameU, bool songModifiedCheck)
 	// file is readable, handle file...
 	switch (FReq_Item)
 	{
-	default:
-	case DISKOP_ITEM_MODULE:
-	{
-		if (songModifiedCheck && song.isModified)
+		default:
+		case DISKOP_ITEM_MODULE:
 		{
-			// remove file selection before okBox() opens up
-			FReq_EntrySelected = -1;
-			diskOp_DrawFilelist();
+			if (song.isModified)
+			{
+				// remove file selection before okBox() opens up
+				FReq_EntrySelected = -1;
+				diskOp_DrawFilelist();
 
-			if (okBox(2, "System request", "You have unsaved changes in your song. Load new song and lose all changes?", NULL) != 1)
-				return;
+				if (okBox(2, "System request", "You have unsaved changes in your song. Load new song and lose all changes?", NULL) != 1)
+					return;
+			}
+
+			editor.loadMusicEvent = EVENT_LOADMUSIC_DISKOP;
+			loadMusic(filenameU);
 		}
-
-		editor.loadMusicEvent = EVENT_LOADMUSIC_DISKOP;
-		loadMusic(filenameU);
-	}
-	break;
-
-	case DISKOP_ITEM_INSTR:
-		loadInstr(filenameU);
 		break;
 
-	case DISKOP_ITEM_SAMPLE:
-		loadSample(filenameU, editor.curSmp, false);
+		case DISKOP_ITEM_INSTR:
+			loadInstr(filenameU);
 		break;
 
-	case DISKOP_ITEM_PATTERN:
-		loadPattern(filenameU);
+		case DISKOP_ITEM_SAMPLE:
+			loadSample(filenameU, editor.curSmp, false);
 		break;
 
-	case DISKOP_ITEM_TRACK:
-		loadTrack(filenameU);
+		case DISKOP_ITEM_PATTERN:
+			loadPattern(filenameU);
+		break;
+
+		case DISKOP_ITEM_TRACK:
+			loadTrack(filenameU);
 		break;
 	}
 }
@@ -897,8 +825,8 @@ void changeFilenameExt(char *name, char *ext, int32_t nameMaxLen)
 	const int32_t len = (int32_t)strlen(name);
 	int32_t extLen = (int32_t)strlen(ext);
 
-	if (len + extLen > nameMaxLen)
-		extLen = nameMaxLen - len;
+	if (len+extLen > nameMaxLen)
+		extLen = nameMaxLen-len;
 
 	strncat(name, ext, extLen);
 
@@ -923,11 +851,11 @@ void trimEntryName(char *name, bool isDir)
 	if (isDir)
 	{
 		// directory
-		while (textWidth(name) > 160 - 8 && j >= 2)
+		while (textWidth(name) > 160-8 && j >= 2)
 		{
-			name[j - 2] = '.';
-			name[j - 1] = '.';
-			name[j - 0] = '\0';
+			name[j-2] = '.';
+			name[j-1] = '.';
+			name[j-0] = '\0';
 			j--;
 		}
 
@@ -940,7 +868,7 @@ void trimEntryName(char *name, bool isDir)
 		sprintf(extBuffer, ".. %s", &name[extOffset]); // "testtestte... .xm"
 
 		extLen = (int32_t)strlen(extBuffer);
-		while (textWidth(name) >= FILESIZE_TEXT_X - FILENAME_TEXT_X && j >= extLen + 1)
+		while (textWidth(name) >= FILESIZE_TEXT_X-FILENAME_TEXT_X && j >= extLen+1)
 		{
 			memcpy(&name[j - extLen], extBuffer, extLen + 1);
 			j--;
@@ -949,11 +877,11 @@ void trimEntryName(char *name, bool isDir)
 	else
 	{
 		// no extension
-		while (textWidth(name) >= FILESIZE_TEXT_X - FILENAME_TEXT_X && j >= 2)
+		while (textWidth(name) >= FILESIZE_TEXT_X-FILENAME_TEXT_X && j >= 2)
 		{
-			name[j - 2] = '.';
-			name[j - 1] = '.';
-			name[j - 0] = '\0';
+			name[j-2] = '.';
+			name[j-1] = '.';
+			name[j-0] = '\0';
 			j--;
 		}
 	}
@@ -965,10 +893,11 @@ void createFileOverwriteText(char *filename, char *buffer)
 
 	// read entry name to a small buffer
 	const uint32_t nameLen = (uint32_t)strlen(filename);
-	memcpy(nameTmp, filename, (nameLen >= sizeof(nameTmp)) ? sizeof(nameTmp) : (nameLen + 1));
-	nameTmp[sizeof(nameTmp) - 1] = '\0';
+	memcpy(nameTmp, filename, (nameLen >= sizeof (nameTmp)) ? sizeof (nameTmp) : (nameLen + 1));
+	nameTmp[sizeof (nameTmp) - 1] = '\0';
 
-	trimEntryName(nameTmp, false);
+	const bool isDir = false;
+	trimEntryName(nameTmp, isDir);
 
 	sprintf(buffer, "Overwrite file \"%s\"?", nameTmp);
 }
@@ -999,156 +928,142 @@ static void diskOpSave(bool checkOverwrite)
 
 	switch (FReq_Item)
 	{
-	default:
-	case DISKOP_ITEM_MODULE:
-	{
-		switch (editor.moduleSaveMode)
-		{
-		case MOD_SAVE_MODE_MOD:
-			diskOpChangeFilenameExt(".mod");
-			break;
 		default:
-		case MOD_SAVE_MODE_XM:
-			diskOpChangeFilenameExt(".xm");
-			break;
-		case MOD_SAVE_MODE_WAV:
-			diskOpChangeFilenameExt(".wav");
-			break;
-		}
-
-		// enter WAV renderer if needed
-		if (editor.moduleSaveMode == MOD_SAVE_MODE_WAV)
+		case DISKOP_ITEM_MODULE:
 		{
-			exitDiskOpScreen();
-			showWavRenderer();
-			return;
-		}
+			switch (editor.moduleSaveMode)
+			{
+				         case MOD_SAVE_MODE_MOD: diskOpChangeFilenameExt(".mod"); break;
+				default: case MOD_SAVE_MODE_XM:  diskOpChangeFilenameExt(".xm");  break;
+				         case MOD_SAVE_MODE_WAV: diskOpChangeFilenameExt(".wav"); break;
+			}
 
-		if (checkOverwrite && fileExistsAnsi(FReq_FileName))
-		{
-			createFileOverwriteText(FReq_FileName, FReq_SysReqText);
-			if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+			// enter WAV renderer if needed
+			if (editor.moduleSaveMode == MOD_SAVE_MODE_WAV)
+			{
+				exitDiskOpScreen();
+				showWavRenderer();
 				return;
-		}
+			}
 
-		fileNameU = cp850ToUnichar(FReq_FileName);
-		if (fileNameU == NULL)
-		{
-			okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
-			return;
-		}
+			if (checkOverwrite && fileExistsAnsi(FReq_FileName))
+			{
+				createFileOverwriteText(FReq_FileName, FReq_SysReqText);
+				if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+					return;
+			}
 
-		saveMusic(fileNameU);
-		free(fileNameU);
-		// sets editor.diskOpReadDir after thread is done
-	}
-	break;
-
-	case DISKOP_ITEM_INSTR:
-	{
-		diskOpChangeFilenameExt(".xi");
-
-		if (checkOverwrite && fileExistsAnsi(FReq_FileName))
-		{
-			createFileOverwriteText(FReq_FileName, FReq_SysReqText);
-			if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+			fileNameU = cp850ToUnichar(FReq_FileName);
+			if (fileNameU == NULL)
+			{
+				okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
 				return;
+			}
+
+			saveMusic(fileNameU);
+			free(fileNameU);
+			// sets editor.diskOpReadDir after thread is done
 		}
+		break;
 
-		fileNameU = cp850ToUnichar(FReq_FileName);
-		if (fileNameU == NULL)
+		case DISKOP_ITEM_INSTR:
 		{
-			okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
-			return;
-		}
+			diskOpChangeFilenameExt(".xi");
 
-		saveInstr(fileNameU, editor.curInstr);
-		free(fileNameU);
-		// editor.diskOpReadDir is set after thread is done
-	}
-	break;
+			if (checkOverwrite && fileExistsAnsi(FReq_FileName))
+			{
+				createFileOverwriteText(FReq_FileName, FReq_SysReqText);
+				if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+					return;
+			}
 
-	case DISKOP_ITEM_SAMPLE:
-	{
-		switch (editor.sampleSaveMode)
-		{
-		case SMP_SAVE_MODE_RAW:
-			diskOpChangeFilenameExt(".raw");
-			break;
-		case SMP_SAVE_MODE_IFF:
-			diskOpChangeFilenameExt(".iff");
-			break;
-		default:
-		case SMP_SAVE_MODE_WAV:
-			diskOpChangeFilenameExt(".wav");
-			break;
-		}
-
-		if (checkOverwrite && fileExistsAnsi(FReq_FileName))
-		{
-			createFileOverwriteText(FReq_FileName, FReq_SysReqText);
-			if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+			fileNameU = cp850ToUnichar(FReq_FileName);
+			if (fileNameU == NULL)
+			{
+				okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
 				return;
+			}
+
+			saveInstr(fileNameU, editor.curInstr);
+			free(fileNameU);
+			// editor.diskOpReadDir is set after thread is done
 		}
+		break;
 
-		fileNameU = cp850ToUnichar(FReq_FileName);
-		if (fileNameU == NULL)
+		case DISKOP_ITEM_SAMPLE:
 		{
-			okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
-			return;
-		}
+			switch (editor.sampleSaveMode)
+			{
+				         case SMP_SAVE_MODE_RAW: diskOpChangeFilenameExt(".raw"); break;
+				         case SMP_SAVE_MODE_IFF: diskOpChangeFilenameExt(".iff"); break;
+				default: case SMP_SAVE_MODE_WAV: diskOpChangeFilenameExt(".wav"); break;
+			}
 
-		saveSample(fileNameU, SAVE_NORMAL);
-		free(fileNameU);
-		// editor.diskOpReadDir is set after thread is done
-	}
-	break;
+			if (checkOverwrite && fileExistsAnsi(FReq_FileName))
+			{
+				createFileOverwriteText(FReq_FileName, FReq_SysReqText);
+				if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+					return;
+			}
 
-	case DISKOP_ITEM_PATTERN:
-	{
-		diskOpChangeFilenameExt(".xp");
-
-		if (checkOverwrite && fileExistsAnsi(FReq_FileName))
-		{
-			createFileOverwriteText(FReq_FileName, FReq_SysReqText);
-			if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+			fileNameU = cp850ToUnichar(FReq_FileName);
+			if (fileNameU == NULL)
+			{
+				okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
 				return;
+			}
+
+			saveSample(fileNameU, SAVE_NORMAL);
+			free(fileNameU);
+			// editor.diskOpReadDir is set after thread is done
 		}
+		break;
 
-		fileNameU = cp850ToUnichar(FReq_FileName);
-		if (fileNameU == NULL)
+		case DISKOP_ITEM_PATTERN:
 		{
-			okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
-			return;
-		}
+			diskOpChangeFilenameExt(".xp");
 
-		editor.diskOpReadDir = savePattern(fileNameU);
-		free(fileNameU);
-	}
-	break;
+			if (checkOverwrite && fileExistsAnsi(FReq_FileName))
+			{
+				createFileOverwriteText(FReq_FileName, FReq_SysReqText);
+				if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+					return;
+			}
 
-	case DISKOP_ITEM_TRACK:
-	{
-		diskOpChangeFilenameExt(".xt");
-
-		if (checkOverwrite && fileExistsAnsi(FReq_FileName))
-		{
-			createFileOverwriteText(FReq_FileName, FReq_SysReqText);
-			if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+			fileNameU = cp850ToUnichar(FReq_FileName);
+			if (fileNameU == NULL)
+			{
+				okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
 				return;
-		}
+			}
 
-		fileNameU = cp850ToUnichar(FReq_FileName);
-		if (fileNameU == NULL)
+			editor.diskOpReadDir = savePattern(fileNameU);
+			free(fileNameU);
+		}
+		break;
+
+		case DISKOP_ITEM_TRACK:
 		{
-			okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
-			return;
-		}
+			diskOpChangeFilenameExt(".xt");
 
-		editor.diskOpReadDir = saveTrack(fileNameU);
-		free(fileNameU);
-	}
-	break;
+			if (checkOverwrite && fileExistsAnsi(FReq_FileName))
+			{
+				createFileOverwriteText(FReq_FileName, FReq_SysReqText);
+				if (okBox(2, "System request", FReq_SysReqText, NULL) != 1)
+					return;
+			}
+
+			fileNameU = cp850ToUnichar(FReq_FileName);
+			if (fileNameU == NULL)
+			{
+				okBox(0, "System message", "General I/O error during saving! Is the file in use?", NULL);
+				return;
+			}
+
+			editor.diskOpReadDir = saveTrack(fileNameU);
+			free(fileNameU);
+		}
+		break;
 	}
 }
 
@@ -1179,97 +1094,97 @@ static void fileListPressed(int32_t index)
 	DirRec *dirEntry = &FReq_Buffer[entryIndex];
 	switch (mode)
 	{
-	// open file/folder
-	default:
-	case MOUSE_MODE_NORMAL:
-	{
-		if (dirEntry->isDir)
-			openDirectory(dirEntry->nameU);
-		else
-			openFile(dirEntry->nameU, true);
-	}
-	break;
-
-	// delete file/folder
-	case MOUSE_MODE_DELETE:
-	{
-		if (!dirEntry->isDir || UNICHAR_STRCMP(dirEntry->nameU, PARENT_DIR_STR)) // don't handle ".." dir
+		// open file/folder
+		default:
+		case MOUSE_MODE_NORMAL:
 		{
-			nameTmp = unicharToCp850(dirEntry->nameU, true);
-			if (nameTmp == NULL)
-				break;
-
-			trimEntryName(nameTmp, dirEntry->isDir);
-
 			if (dirEntry->isDir)
-				sprintf(FReq_SysReqText, "Delete directory \"%s\"?", nameTmp);
+				openDirectory(dirEntry->nameU);
 			else
-				sprintf(FReq_SysReqText, "Delete file \"%s\"?", nameTmp);
-
-			free(nameTmp);
-
-			if (okBox(2, "System request", FReq_SysReqText, NULL) == 1)
-			{
-				if (dirEntry->isDir)
-				{
-					result = deleteDirRecursive(dirEntry->nameU);
-					if (!result)
-						okBox(0, "System message", "Couldn't delete folder: Access denied!", NULL);
-					else
-						editor.diskOpReadDir = true;
-				}
-				else
-				{
-					result = (UNICHAR_REMOVE(dirEntry->nameU) == 0);
-					if (!result)
-						okBox(0, "System message", "Couldn't delete file: Access denied!", NULL);
-					else
-						editor.diskOpReadDir = true;
-				}
-			}
+				openFile(dirEntry->nameU);
 		}
-	}
-	break;
+		break;
 
-	// rename file/folder
-	case MOUSE_MODE_RENAME:
-	{
-		if (dirEntry->isDir || UNICHAR_STRCMP(dirEntry->nameU, PARENT_DIR_STR)) // don't handle ".." dir
+		// delete file/folder
+		case MOUSE_MODE_DELETE:
 		{
-			nameTmp = unicharToCp850(dirEntry->nameU, true);
-			if (nameTmp == NULL)
-				break;
-
-			strncpy(FReq_NameTemp, nameTmp, PATH_MAX);
-			FReq_NameTemp[PATH_MAX] = '\0';
-			free(nameTmp);
-
-			// in case of UTF8 -> CP437 encoding failure, there can be question marks. Remove them...
-			removeQuestionmarksFromString(FReq_NameTemp);
-
-			if (inputBox(1, dirEntry->isDir ? "Enter new directory name:" : "Enter new filename:", FReq_NameTemp, PATH_MAX) == 1)
+			if (!dirEntry->isDir || UNICHAR_STRCMP(dirEntry->nameU, PARENT_DIR_STR)) // don't handle ".." dir
 			{
-				if (FReq_NameTemp == NULL || FReq_NameTemp[0] == '\0')
-				{
-					okBox(0, "System message", "New name can't be empty!", NULL);
+				nameTmp = unicharToCp850(dirEntry->nameU, true);
+				if (nameTmp == NULL)
 					break;
-				}
 
-				if (!renameAnsi(dirEntry->nameU, FReq_NameTemp))
+				trimEntryName(nameTmp, dirEntry->isDir);
+
+				if (dirEntry->isDir)
+					sprintf(FReq_SysReqText, "Delete directory \"%s\"?", nameTmp);
+				else
+					sprintf(FReq_SysReqText, "Delete file \"%s\"?", nameTmp);
+
+				free(nameTmp);
+
+				if (okBox(2, "System request", FReq_SysReqText, NULL) == 1)
 				{
 					if (dirEntry->isDir)
-						okBox(0, "System message", "Couldn't rename directory: Access denied, or dir already exists!", NULL);
+					{
+						result = deleteDirRecursive(dirEntry->nameU);
+						if (!result)
+							okBox(0, "System message", "Couldn't delete folder: Access denied!", NULL);
+						else
+							editor.diskOpReadDir = true;
+					}
 					else
-						okBox(0, "System message", "Couldn't rename file: Access denied, or file already exists!", NULL);
-				}
-				else
-				{
-					editor.diskOpReadDir = true;
+					{
+						result = (UNICHAR_REMOVE(dirEntry->nameU) == 0);
+						if (!result)
+							okBox(0, "System message", "Couldn't delete file: Access denied!", NULL);
+						else
+							editor.diskOpReadDir = true;
+					}
 				}
 			}
 		}
-	}
-	break;
+		break;
+
+		// rename file/folder
+		case MOUSE_MODE_RENAME:
+		{
+			if (dirEntry->isDir || UNICHAR_STRCMP(dirEntry->nameU, PARENT_DIR_STR)) // don't handle ".." dir
+			{
+				nameTmp = unicharToCp850(dirEntry->nameU, true);
+				if (nameTmp == NULL)
+					break;
+
+				strncpy(FReq_NameTemp, nameTmp, PATH_MAX);
+				FReq_NameTemp[PATH_MAX] = '\0';
+				free(nameTmp);
+
+				// in case of UTF8 -> CP437 encoding failure, there can be question marks. Remove them...
+				removeQuestionmarksFromString(FReq_NameTemp);
+
+				if (inputBox(1, dirEntry->isDir ? "Enter new directory name:" : "Enter new filename:", FReq_NameTemp, PATH_MAX) == 1)
+				{
+					if (FReq_NameTemp == NULL || FReq_NameTemp[0] == '\0')
+					{
+						okBox(0, "System message", "New name can't be empty!", NULL);
+						break;
+					}
+
+					if (!renameAnsi(dirEntry->nameU, FReq_NameTemp))
+					{
+						if (dirEntry->isDir)
+							okBox(0, "System message", "Couldn't rename directory: Access denied, or dir already exists!", NULL);
+						else
+							okBox(0, "System message", "Couldn't rename file: Access denied, or file already exists!", NULL);
+					}
+					else
+					{
+						editor.diskOpReadDir = true;
+					}
+				}
+			}
+		}
+		break;
 	}
 }
 
@@ -1387,45 +1302,33 @@ static uint8_t handleEntrySkip(UNICHAR *nameU, bool isDir)
 {
 	// skip if illegal name or filesize >32-bit
 	if (nameU == NULL)
-	{
 		return true;
-	}
 
 	char *name = unicharToCp850(nameU, false);
 	if (name == NULL)
-	{
 		return true;
-	}
-
+	
 	if (name[0] == '\0')
-	{
 		goto skipEntry;
-	}
 
 	const int32_t nameLen = (int32_t)strlen(name);
 
 	// skip ".name" dirs/files
 	if (nameLen >= 2 && name[0] == '.' && name[1] != '.')
-	{
 		goto skipEntry;
-	}
 
 	if (isDir)
 	{
 		// skip '.' directory
 		if (nameLen == 1 && name[0] == '.')
-		{
 			goto skipEntry;
-		}
 
 		// macOS/Linux: skip '..' directory if we're in root
 #ifndef _WIN32
 		if (nameLen == 2 && name[0] == '.' && name[1] == '.')
 		{
 			if (FReq_CurPathU[0] == '/' && FReq_CurPathU[1] == '\0')
-			{
 				goto skipEntry;
-			}
 		}
 #endif
 	}
@@ -1445,56 +1348,56 @@ static uint8_t handleEntrySkip(UNICHAR *nameU, bool isDir)
 		// decide what entries to keep based on file extension
 		switch (FReq_Item)
 		{
-		default:
-		case DISKOP_ITEM_MODULE:
-		{
-			if (editor.moduleSaveMode == MOD_SAVE_MODE_WAV && !_stricmp("wav", extPtr))
-				break; // show .wav files when save mode is "WAV"
+			default:
+			case DISKOP_ITEM_MODULE:
+			{
+				if (editor.moduleSaveMode == MOD_SAVE_MODE_WAV && !_stricmp("wav", extPtr))
+					break; // show .wav files when save mode is "WAV"
 
-			if (!moduleExtensionAccepted(extPtr))
+				if (!moduleExtensionAccepted(extPtr))
+					goto skipEntry;
+			}
+			break;
+
+			case DISKOP_ITEM_INSTR:
+			{
+				if (!_stricmp("xi", extPtr))
+					break;
+
+				if (!sampleExtensionAccepted(extPtr))
+					goto skipEntry;
+			}
+			break;
+
+			case DISKOP_ITEM_SAMPLE:
+			{
+				if (!sampleExtensionAccepted(extPtr))
+					goto skipEntry;
+			}
+			break;
+
+			case DISKOP_ITEM_PATTERN:
+			{
+				if (!_stricmp("xp", extPtr))
+					break;
+
 				goto skipEntry;
-		}
-		break;
+			}
+			break;
 
-		case DISKOP_ITEM_INSTR:
-		{
-			if (!_stricmp("xi", extPtr))
-				break;
+			case DISKOP_ITEM_TRACK:
+			{
+				if (!_stricmp("xt", extPtr))
+					break;
 
-			if (!sampleExtensionAccepted(extPtr))
 				goto skipEntry;
-		}
-		break;
-
-		case DISKOP_ITEM_SAMPLE:
-		{
-			if (!sampleExtensionAccepted(extPtr))
-				goto skipEntry;
-		}
-		break;
-
-		case DISKOP_ITEM_PATTERN:
-		{
-			if (!_stricmp("xp", extPtr))
-				break;
-
-			goto skipEntry;
-		}
-		break;
-
-		case DISKOP_ITEM_TRACK:
-		{
-			if (!_stricmp("xt", extPtr))
-				break;
-
-			goto skipEntry;
-		}
-		break;
+			}
+			break;
 		}
 	}
 
 	free(name);
-	return false; // Don't skip entry
+	return false; // "Show All Files" mode is enabled, don't skip entry
 
 skipEntry:
 	free(name);
@@ -1691,9 +1594,9 @@ static bool swapBufferEntry(int32_t a, int32_t b) // used for sorting
 	if (a >= FReq_FileCount || b >= FReq_FileCount)
 		return false;
 
-	DirRec tmpBuffer = FReq_Buffer[a];
+	DirRec tmp = FReq_Buffer[a];
 	FReq_Buffer[a] = FReq_Buffer[b];
-	FReq_Buffer[b] = tmpBuffer;
+	FReq_Buffer[b] = tmp;
 
 	return true;
 }
@@ -1713,7 +1616,7 @@ static char *ach(int32_t rad) // used for sortDirectory()
 		return NULL;
 	}
 
-	char *p = (char *)malloc(nameLen + 1 + 1);
+	char *p = (char *)malloc(nameLen+1+1);
 	if (p == NULL)
 	{
 		free(name);
@@ -1758,9 +1661,9 @@ static char *ach(int32_t rad) // used for sortDirectory()
 			}
 
 			// FILENAME.EXT -> EXT.FILENAME (for sorting)
-			memcpy(p, &name[i + 1], extLen - 1);
-			memcpy(&p[extLen - 1], name, i);
-			p[nameLen - 1] = '\0';
+			memcpy(p, &name[i+1], extLen - 1);
+			memcpy(&p[extLen-1], name, i);
+			p[nameLen-1] = '\0';
 
 			free(name);
 			return p;
@@ -1785,14 +1688,12 @@ static void sortDirectory(void)
 			for (uint32_t i = 0; i < limit; i++)
 			{
 				char *p1 = ach(i);
-				char *p2 = ach(offset + i);
+				char *p2 = ach(offset+i);
 
 				if (p1 == NULL || p2 == NULL)
 				{
-					if (p1 != NULL)
-						free(p1);
-					if (p2 != NULL)
-						free(p2);
+					if (p1 != NULL) free(p1);
+					if (p2 != NULL) free(p2);
 					okBox(0, "System message", "Not enough memory!", NULL);
 					return;
 				}
@@ -1812,7 +1713,8 @@ static void sortDirectory(void)
 				free(p1);
 				free(p2);
 			}
-		} while (didSwap);
+		}
+		while (didSwap);
 
 		offset >>= 1;
 	}
@@ -1820,25 +1722,16 @@ static void sortDirectory(void)
 
 static uint8_t numDigits32(uint32_t x)
 {
-	if (x >= 1000000000)
-		return 10;
-	if (x >= 100000000)
-		return 9;
-	if (x >= 10000000)
-		return 8;
-	if (x >= 1000000)
-		return 7;
-	if (x >= 100000)
-		return 6;
-	if (x >= 10000)
-		return 5;
-	if (x >= 1000)
-		return 4;
-	if (x >= 100)
-		return 3;
-	if (x >= 10)
-		return 2;
-
+	if (x >= 1000000000) return 10;
+	if (x >=  100000000) return  9;
+	if (x >=   10000000) return  8;
+	if (x >=    1000000) return  7;
+	if (x >=     100000) return  6;
+	if (x >=      10000) return  5;
+	if (x >=       1000) return  4;
+	if (x >=        100) return  3;
+	if (x >=         10) return  2;
+	
 	return 1;
 }
 
@@ -1855,16 +1748,16 @@ static void printFormattedFilesize(uint16_t x, uint16_t y, uint32_t bufEntry)
 		return;
 	}
 
-	assert(filesize >= 0);
+	ASSERT(filesize >= 0);
 
-	if (filesize >= 1024 * 1024 * 10) // >= 10MB?
+	if (filesize >= 1024*1024*10) // >= 10MB?
 	{
-	forceMB:
-		printFilesize = (int32_t)ceil(filesize / (1024.0 * 1024.0));
+forceMB:
+		printFilesize = (int32_t)ceil(filesize / (1024.0*1024.0));
 		x += (4 - numDigits32(printFilesize)) * (FONT1_CHAR_W - 1);
 		sprintf(sizeStrBuffer, "%dM", printFilesize);
 	}
-	else if (filesize >= 1024 * 10) // >= 10kB?
+	else if (filesize >= 1024*10) // >= 10kB?
 	{
 		printFilesize = (int32_t)ceil(filesize / 1024.0);
 		if (printFilesize > 9999)
@@ -1897,7 +1790,7 @@ static void displayCurrPath(void)
 	char *asciiPath = unicharToCp850(FReq_CurPathU, true);
 	if (asciiPath == NULL)
 	{
-		okBox(0, "System message", "Not enough memory!", NULL);
+		okBox(0, "System message", "Could not get CWD!", NULL);
 		return;
 	}
 
@@ -1914,9 +1807,7 @@ static void displayCurrPath(void)
 #ifdef _WIN32
 		memcpy(FReq_NameTemp, p, 3); // get drive (f.ex. C:\)
 		FReq_NameTemp[3] = '\0';
-
-		strcat(FReq_NameTemp, ".\001"); // special character in font
-		FReq_NameTemp[5] = '\0';
+		strcat(FReq_NameTemp, "..\\");
 #else
 		FReq_NameTemp[0] = '\0';
 		strcpy(FReq_NameTemp, "/");
@@ -1927,7 +1818,7 @@ static void displayCurrPath(void)
 		if (delimiter != NULL)
 		{
 #ifdef _WIN32
-			strcat(FReq_NameTemp, delimiter + 1);
+			strcat(FReq_NameTemp, delimiter+1);
 #else
 			strcat(FReq_NameTemp, delimiter);
 #endif
@@ -1941,9 +1832,9 @@ static void displayCurrPath(void)
 			p = FReq_NameTemp;
 			while (j >= 6 && textWidth(p) >= 162)
 			{
-				p[j - 2] = '.';
-				p[j - 1] = '.';
-				p[j - 0] = '\0';
+				p[j-2] = '.';
+				p[j-1] = '.';
+				p[j-0] = '\0';
 				j--;
 			}
 		}
@@ -1956,7 +1847,7 @@ static void displayCurrPath(void)
 
 void diskOp_DrawFilelist(void)
 {
-	clearRect(FILENAME_TEXT_X - 1, 4, 162, 164);
+	clearRect(FILENAME_TEXT_X-1, 4, 162, 164);
 
 	if (FReq_FileCount == 0)
 		return;
@@ -2016,18 +1907,16 @@ void diskOp_DrawDirectory(void)
 #endif
 
 	setScrollBarEnd(SB_DISKOP_LIST, FReq_FileCount);
-	setScrollBarPos(SB_DISKOP_LIST, FReq_DirPos, false);
+	setScrollBarPos(SB_DISKOP_LIST, FReq_DirPos, DONT_TRIGGER_CALLBACK);
 
 	diskOp_DrawFilelist();
 }
 
 static DirRec *bufferCreateEmptyDir(void) // special case: creates a dir entry with a ".." directory
 {
-	DirRec *dirEntry = (DirRec *)malloc(sizeof(DirRec));
+	DirRec *dirEntry = (DirRec *)malloc(sizeof (DirRec));
 	if (dirEntry == NULL)
-	{
 		return NULL;
-	}
 
 	dirEntry->nameU = UNICHAR_STRDUP(PARENT_DIR_STR);
 	if (dirEntry->nameU == NULL)
@@ -2042,12 +1931,11 @@ static DirRec *bufferCreateEmptyDir(void) // special case: creates a dir entry w
 	return dirEntry;
 }
 
-static int32_t SDLCALL diskOp_ReadDirectoryThread(void *ptr)
+static int32_t diskOp_ReadDirectoryThread(void *ptr)
 {
-	DirRec tmpBuffer;
+	DirRec tmp;
 
 	FReq_DirPos = 0;
-	FReq_FileCount = 0; // Initialize file count to 0
 
 	// free old buffer
 	freeDirRecBuffer();
@@ -2055,92 +1943,47 @@ static int32_t SDLCALL diskOp_ReadDirectoryThread(void *ptr)
 	UNICHAR_GETCWD(FReq_CurPathU, PATH_MAX);
 
 	// read first file
-	int8_t lastFindFileFlag = findFirst(&tmpBuffer);
-
+	int8_t lastFindFileFlag = findFirst(&tmp);
 	if (lastFindFileFlag != LFF_DONE && lastFindFileFlag != LFF_SKIP)
 	{
-#ifdef __EMSCRIPTEN__
-		// For Emscripten, start with a smaller initial allocation and grow as needed
-		const int32_t initialCapacity = 10;
-		FReq_Buffer = (DirRec *)malloc(sizeof(DirRec) * initialCapacity);
-#else
-		FReq_Buffer = (DirRec *)malloc(sizeof(DirRec) * (FReq_FileCount + 1));
-#endif
+		FReq_Buffer = (DirRec *)malloc(sizeof (DirRec));
 		if (FReq_Buffer == NULL)
 		{
 			findClose();
 
-#ifdef __EMSCRIPTEN__
-			okBox(0, "System message", "Not enough memory!", NULL);
-#else
 			okBoxThreadSafe(0, "System message", "Not enough memory!", NULL);
-#endif
 
 			FReq_Buffer = bufferCreateEmptyDir();
 			if (FReq_Buffer != NULL)
-			{
 				FReq_FileCount = 1;
-			}
 			else
-			{
-#ifdef __EMSCRIPTEN__
-				okBox(0, "System message", "Not enough memory!", NULL);
-#else
 				okBoxThreadSafe(0, "System message", "Not enough memory!", NULL);
-#endif
-			}
 
 			setMouseBusy(false);
 			return false;
 		}
 
-		memcpy(&FReq_Buffer[FReq_FileCount], &tmpBuffer, sizeof(DirRec));
+		memcpy(FReq_Buffer, &tmp, sizeof (DirRec));
 		FReq_FileCount++;
 	}
 
 	// read remaining files
-#ifdef __EMSCRIPTEN__
-	int32_t currentCapacity = 10;
-#endif
-
 	while (lastFindFileFlag != LFF_DONE)
 	{
-		lastFindFileFlag = findNext(&tmpBuffer);
+		lastFindFileFlag = findNext(&tmp);
 		if (lastFindFileFlag != LFF_DONE && lastFindFileFlag != LFF_SKIP)
 		{
-#ifdef __EMSCRIPTEN__
-			// Check if we need to expand capacity for Emscripten
-			if (FReq_FileCount >= currentCapacity)
-			{
-				currentCapacity = currentCapacity * 2; // Double the capacity
-				DirRec *newPtr = (DirRec *)realloc(FReq_Buffer, sizeof(DirRec) * currentCapacity);
-				if (newPtr == NULL)
-				{
-					freeDirRecBuffer();
-					okBox(0, "System message", "Not enough memory! Too many files in directory.", NULL);
-
-					// Create minimal directory with just parent link
-					FReq_Buffer = bufferCreateEmptyDir();
-					if (FReq_Buffer != NULL)
-						FReq_FileCount = 1;
-
-					setMouseBusy(false);
-					return true; // Return success with minimal directory
-				}
-				FReq_Buffer = newPtr;
-			}
-#else
-			DirRec *newPtr = (DirRec *)realloc(FReq_Buffer, sizeof(DirRec) * (FReq_FileCount + 1));
+			DirRec *newPtr = (DirRec *)realloc(FReq_Buffer, sizeof (DirRec) * (FReq_FileCount + 1));
 			if (newPtr == NULL)
 			{
 				freeDirRecBuffer();
 				okBoxThreadSafe(0, "System message", "Not enough memory!", NULL);
 				break;
 			}
-			FReq_Buffer = newPtr;
-#endif
 
-			memcpy(&FReq_Buffer[FReq_FileCount], &tmpBuffer, sizeof(DirRec));
+			FReq_Buffer = newPtr;
+
+			memcpy(&FReq_Buffer[FReq_FileCount], &tmp, sizeof (DirRec));
 			FReq_FileCount++;
 		}
 	}
@@ -2158,11 +2001,7 @@ static int32_t SDLCALL diskOp_ReadDirectoryThread(void *ptr)
 		if (FReq_Buffer != NULL)
 			FReq_FileCount = 1;
 		else
-#ifdef __EMSCRIPTEN__
-			okBox(0, "System message", "Not enough memory!", NULL);
-#else
 			okBoxThreadSafe(0, "System message", "Not enough memory!", NULL);
-#endif
 	}
 
 	editor.diskOpReadDone = true;
@@ -2178,12 +2017,10 @@ void diskOp_StartDirReadThread(void)
 	editor.diskOpReadDone = false;
 
 	mouseAnimOn();
-
 #ifdef __EMSCRIPTEN__
-	// Emscripten doesn't support threading, so run directory reading synchronously
 	diskOp_ReadDirectoryThread(NULL);
 #else
-	thread = SDL_CreateThread(diskOp_ReadDirectoryThread, NULL, NULL);
+	thread = SDL_CreateThread(diskOp_ReadDirectoryThread, "file lister thread", NULL);
 	if (thread == NULL)
 	{
 		editor.diskOpReadDone = true;
@@ -2199,33 +2036,33 @@ static void drawSaveAsElements(void)
 {
 	switch (FReq_Item)
 	{
-	default:
-	case DISKOP_ITEM_MODULE:
-	{
-		textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "MOD");
-		textOutShadow(19, 115, PAL_FORGRND, PAL_DSKTOP2, "XM");
-		textOutShadow(19, 129, PAL_FORGRND, PAL_DSKTOP2, "WAV");
-	}
-	break;
-
-	case DISKOP_ITEM_INSTR:
-		textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XI");
+		default:
+		case DISKOP_ITEM_MODULE:
+		{
+			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "MOD");
+			textOutShadow(19, 115, PAL_FORGRND, PAL_DSKTOP2, "XM");
+			textOutShadow(19, 129, PAL_FORGRND, PAL_DSKTOP2, "WAV");
+		}
 		break;
 
-	case DISKOP_ITEM_SAMPLE:
-	{
-		textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "RAW");
-		textOutShadow(19, 115, PAL_FORGRND, PAL_DSKTOP2, "IFF");
-		textOutShadow(19, 129, PAL_FORGRND, PAL_DSKTOP2, "WAV");
-	}
-	break;
-
-	case DISKOP_ITEM_PATTERN:
-		textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XP");
+		case DISKOP_ITEM_INSTR:
+			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XI");
 		break;
 
-	case DISKOP_ITEM_TRACK:
-		textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XT");
+		case DISKOP_ITEM_SAMPLE:
+		{
+			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "RAW");
+			textOutShadow(19, 115, PAL_FORGRND, PAL_DSKTOP2, "IFF");
+			textOutShadow(19, 129, PAL_FORGRND, PAL_DSKTOP2, "WAV");
+		}
+		break;
+
+		case DISKOP_ITEM_PATTERN:
+			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XP");
+		break;
+
+		case DISKOP_ITEM_TRACK:
+			textOutShadow(19, 101, PAL_FORGRND, PAL_DSKTOP2, "XT");
 		break;
 	}
 }
@@ -2253,33 +2090,19 @@ static void setDiskOpItemRadioButtons(void)
 	radioButtons[RB_DISKOP_MOD_SAVEAS_MOD + editor.moduleSaveMode].state = RADIOBUTTON_CHECKED;
 	radioButtons[RB_DISKOP_SMP_SAVEAS_RAW + editor.sampleSaveMode].state = RADIOBUTTON_CHECKED;
 
-	if (FReq_Item == DISKOP_ITEM_INSTR)
-		radioButtons[RB_DISKOP_INS_SAVEAS_XI].state = RADIOBUTTON_CHECKED;
-	if (FReq_Item == DISKOP_ITEM_PATTERN)
-		radioButtons[RB_DISKOP_PAT_SAVEAS_XP].state = RADIOBUTTON_CHECKED;
-	if (FReq_Item == DISKOP_ITEM_TRACK)
-		radioButtons[RB_DISKOP_TRK_SAVEAS_XT].state = RADIOBUTTON_CHECKED;
+	if (FReq_Item == DISKOP_ITEM_INSTR)   radioButtons[RB_DISKOP_INS_SAVEAS_XI].state = RADIOBUTTON_CHECKED;
+	if (FReq_Item == DISKOP_ITEM_PATTERN) radioButtons[RB_DISKOP_PAT_SAVEAS_XP].state = RADIOBUTTON_CHECKED;
+	if (FReq_Item == DISKOP_ITEM_TRACK)   radioButtons[RB_DISKOP_TRK_SAVEAS_XT].state = RADIOBUTTON_CHECKED;
 
 	if (ui.diskOpShown)
 	{
 		switch (FReq_Item)
 		{
-		default:
-		case DISKOP_ITEM_MODULE:
-			showRadioButtonGroup(RB_GROUP_DISKOP_MOD_SAVEAS);
-			break;
-		case DISKOP_ITEM_INSTR:
-			showRadioButtonGroup(RB_GROUP_DISKOP_INS_SAVEAS);
-			break;
-		case DISKOP_ITEM_SAMPLE:
-			showRadioButtonGroup(RB_GROUP_DISKOP_SMP_SAVEAS);
-			break;
-		case DISKOP_ITEM_PATTERN:
-			showRadioButtonGroup(RB_GROUP_DISKOP_PAT_SAVEAS);
-			break;
-		case DISKOP_ITEM_TRACK:
-			showRadioButtonGroup(RB_GROUP_DISKOP_TRK_SAVEAS);
-			break;
+			default: case DISKOP_ITEM_MODULE:  showRadioButtonGroup(RB_GROUP_DISKOP_MOD_SAVEAS); break;
+			         case DISKOP_ITEM_INSTR:   showRadioButtonGroup(RB_GROUP_DISKOP_INS_SAVEAS); break;
+			         case DISKOP_ITEM_SAMPLE:  showRadioButtonGroup(RB_GROUP_DISKOP_SMP_SAVEAS); break;
+			         case DISKOP_ITEM_PATTERN: showRadioButtonGroup(RB_GROUP_DISKOP_PAT_SAVEAS); break;
+			         case DISKOP_ITEM_TRACK:   showRadioButtonGroup(RB_GROUP_DISKOP_TRK_SAVEAS); break;
 		}
 	}
 }
@@ -2298,96 +2121,91 @@ static void setDiskOpItem(uint8_t item)
 	FReq_Item = item;
 	switch (FReq_Item)
 	{
-	default:
-	case DISKOP_ITEM_MODULE:
-	{
-		FReq_FileName = modTmpFName;
-
-		// FReq_ModCurPathU is always set at this point
-
-		FReq_CurPathU = FReq_ModCurPathU;
-		if (FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+		default:
+		case DISKOP_ITEM_MODULE:
 		{
-			UNICHAR_CHDIR(FReq_CurPathU);
+			FReq_FileName = modTmpFName;
+
+			// FReq_ModCurPathU is always set at this point
+
+			FReq_CurPathU = FReq_ModCurPathU;
+			if (FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+				UNICHAR_CHDIR(FReq_CurPathU);
 		}
-	}
-	break;
+		break;
 
-	case DISKOP_ITEM_INSTR:
-	{
-		FReq_FileName = insTmpFName;
-
-		if (!insPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+		case DISKOP_ITEM_INSTR:
 		{
-			UNICHAR_STRCPY(FReq_InsCurPathU, FReq_CurPathU);
-			insPathSet = true;
+			FReq_FileName = insTmpFName;
+
+			if (!insPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+			{
+				UNICHAR_STRCPY(FReq_InsCurPathU, FReq_CurPathU);
+				insPathSet = true;
+			}
+
+			FReq_CurPathU = FReq_InsCurPathU;
+			if (FReq_CurPathU != NULL)
+				UNICHAR_CHDIR(FReq_CurPathU);
 		}
+		break;
 
-		FReq_CurPathU = FReq_InsCurPathU;
-		if (FReq_CurPathU != NULL)
-			UNICHAR_CHDIR(FReq_CurPathU);
-	}
-	break;
-
-	case DISKOP_ITEM_SAMPLE:
-	{
-		FReq_FileName = smpTmpFName;
-
-		if (!smpPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+		case DISKOP_ITEM_SAMPLE:
 		{
-			UNICHAR_STRCPY(FReq_SmpCurPathU, FReq_CurPathU);
-			smpPathSet = true;
+			FReq_FileName = smpTmpFName;
+
+			if (!smpPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+			{
+				UNICHAR_STRCPY(FReq_SmpCurPathU, FReq_CurPathU);
+				smpPathSet = true;
+			}
+
+			FReq_CurPathU = FReq_SmpCurPathU;
+			if (FReq_CurPathU != NULL)
+				UNICHAR_CHDIR(FReq_CurPathU);
 		}
+		break;
 
-		FReq_CurPathU = FReq_SmpCurPathU;
-		if (FReq_CurPathU != NULL)
-			UNICHAR_CHDIR(FReq_CurPathU);
-	}
-	break;
-
-	case DISKOP_ITEM_PATTERN:
-	{
-		FReq_FileName = patTmpFName;
-
-		if (!patPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+		case DISKOP_ITEM_PATTERN:
 		{
-			UNICHAR_STRCPY(FReq_PatCurPathU, FReq_CurPathU);
-			patPathSet = true;
+			FReq_FileName = patTmpFName;
+
+			if (!patPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+			{
+				UNICHAR_STRCPY(FReq_PatCurPathU, FReq_CurPathU);
+				patPathSet = true;
+			}
+
+			FReq_CurPathU = FReq_PatCurPathU;
+			if (FReq_CurPathU != NULL)
+				UNICHAR_CHDIR(FReq_CurPathU);
 		}
+		break;
 
-		FReq_CurPathU = FReq_PatCurPathU;
-		if (FReq_CurPathU != NULL)
-			UNICHAR_CHDIR(FReq_CurPathU);
-	}
-	break;
-
-	case DISKOP_ITEM_TRACK:
-	{
-		FReq_FileName = trkTmpFName;
-
-		if (!trkPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+		case DISKOP_ITEM_TRACK:
 		{
-			UNICHAR_STRCPY(FReq_TrkCurPathU, FReq_CurPathU);
-			trkPathSet = true;
-		}
+			FReq_FileName = trkTmpFName;
 
-		FReq_CurPathU = FReq_TrkCurPathU;
-		if (FReq_CurPathU != NULL)
-			UNICHAR_CHDIR(FReq_CurPathU);
-	}
-	break;
+			if (!trkPathSet && FReq_CurPathU != NULL && FReq_CurPathU[0] != '\0')
+			{
+				UNICHAR_STRCPY(FReq_TrkCurPathU, FReq_CurPathU);
+				trkPathSet = true;
+			}
+
+			FReq_CurPathU = FReq_TrkCurPathU;
+			if (FReq_CurPathU != NULL)
+				UNICHAR_CHDIR(FReq_CurPathU);
+		}
+		break;
 	}
 
 	if (FReq_CurPathU != NULL && FReq_ModCurPathU != NULL)
 	{
 		if (FReq_CurPathU[0] == '\0' && FReq_ModCurPathU[0] != '\0')
-		{
 			UNICHAR_STRCPY(FReq_CurPathU, FReq_ModCurPathU);
-		}
 	}
 
 	textBoxes[TB_DISKOP_FILENAME].textPtr = FReq_FileName;
-	FReq_ShowAllFiles = false;
 
 	if (ui.diskOpShown)
 	{
@@ -2408,15 +2226,15 @@ static void setDiskOpItem(uint8_t item)
 
 static void drawDiskOpScreen(void)
 {
-	drawFramework(0, 0, 67, 86, FRAMEWORK_TYPE1);
-	drawFramework(67, 0, 64, 142, FRAMEWORK_TYPE1);
-	drawFramework(131, 0, 37, 142, FRAMEWORK_TYPE1);
-	drawFramework(0, 86, 67, 56, FRAMEWORK_TYPE1);
-	drawFramework(0, 142, 168, 31, FRAMEWORK_TYPE1);
-	drawFramework(168, 0, 164, 3, FRAMEWORK_TYPE1);
-	drawFramework(168, 170, 164, 3, FRAMEWORK_TYPE1);
-	drawFramework(332, 0, 24, 173, FRAMEWORK_TYPE1);
-	drawFramework(30, 157, 136, 14, FRAMEWORK_TYPE2);
+	drawFramework(0,     0,  67,  86, FRAMEWORK_TYPE1);
+	drawFramework(67,    0,  64, 142, FRAMEWORK_TYPE1);
+	drawFramework(131,   0,  37, 142, FRAMEWORK_TYPE1);
+	drawFramework(0,    86,  67,  56, FRAMEWORK_TYPE1);
+	drawFramework(0,   142, 168,  31, FRAMEWORK_TYPE1);
+	drawFramework(168,   0, 164,   3, FRAMEWORK_TYPE1);
+	drawFramework(168, 170, 164,   3, FRAMEWORK_TYPE1);
+	drawFramework(332,   0,  24, 173, FRAMEWORK_TYPE1);
+	drawFramework(30,  157, 136,  14, FRAMEWORK_TYPE2);
 
 	clearRect(168, 2, 164, 168);
 
@@ -2428,10 +2246,12 @@ static void drawDiskOpScreen(void)
 	showPushButton(PB_DISKOP_EXIT);
 	showPushButton(PB_DISKOP_PARENT);
 	showPushButton(PB_DISKOP_ROOT);
-	showPushButton(PB_DISKOP_SHOW_ALL);
 	showPushButton(PB_DISKOP_SET_PATH);
 	showPushButton(PB_DISKOP_LIST_UP);
 	showPushButton(PB_DISKOP_LIST_DOWN);
+
+	showCheckBox(CB_DISKOP_SHOW_ALL);
+	textOutShadow(85, 108, PAL_FORGRND, PAL_DSKTOP2, "All files");
 
 	showScrollBar(SB_DISKOP_LIST);
 	showTextBox(TB_DISKOP_FILENAME);
@@ -2446,7 +2266,7 @@ static void drawDiskOpScreen(void)
 	showRadioButtonGroup(RB_GROUP_DISKOP_ITEM);
 
 	// item selector
-	textOutShadow(5, 3, PAL_FORGRND, PAL_DSKTOP2, "Item:");
+	textOutShadow(5,   3, PAL_FORGRND, PAL_DSKTOP2, "Item:");
 	textOutShadow(19, 17, PAL_FORGRND, PAL_DSKTOP2, "Module");
 	textOutShadow(19, 31, PAL_FORGRND, PAL_DSKTOP2, "Instr.");
 	textOutShadow(19, 45, PAL_FORGRND, PAL_DSKTOP2, "Sample");
@@ -2454,7 +2274,7 @@ static void drawDiskOpScreen(void)
 	textOutShadow(19, 73, PAL_FORGRND, PAL_DSKTOP2, "Track");
 
 	// file format
-	textOutShadow(5, 89, PAL_FORGRND, PAL_DSKTOP2, "Save as:");
+	textOutShadow(5,  89, PAL_FORGRND, PAL_DSKTOP2, "Save as:");
 	drawSaveAsElements();
 	setDiskOpItemRadioButtons();
 
@@ -2469,31 +2289,19 @@ void showDiskOpScreen(void)
 	// if first time opening Disk Op., set initial directory
 	if (firstTimeOpeningDiskOp)
 	{
-		assert(FReq_ModCurPathU != NULL);
+		ASSERT(FReq_ModCurPathU != NULL);
 
 		// first test if we can change the dir to the one stored in the config (if present)
 		if (FReq_ModCurPathU[0] == '\0' || UNICHAR_CHDIR(FReq_ModCurPathU) != 0)
 		{
-			// nope, couldn't do that, set Disk Op. path to the user's desktop directory
+			// nope, couldn't do that, set Disk Op. path to a suitable user directory
 #ifdef __EMSCRIPTEN__
-			// For Emscripten, use /home/web_user to avoid the VFS root with embedded files
 			if (UNICHAR_CHDIR("/home/web_user") == 0)
-			{
 				UNICHAR_STRCPY(FReq_ModCurPathU, "/home/web_user");
-			}
+			else if (UNICHAR_CHDIR("/home") == 0)
+				UNICHAR_STRCPY(FReq_ModCurPathU, "/home");
 			else
-			{
-				// Fallback to /home if /home/web_user doesn't exist
-				if (UNICHAR_CHDIR("/home") == 0)
-				{
-					UNICHAR_STRCPY(FReq_ModCurPathU, "/home");
-				}
-				else
-				{
-					// Last resort: stay in current directory
-					UNICHAR_GETCWD(FReq_ModCurPathU, PATH_MAX);
-				}
-			}
+				UNICHAR_GETCWD(FReq_ModCurPathU, PATH_MAX);
 #elif defined(_WIN32)
 			SHGetFolderPathW(NULL, CSIDL_DESKTOPDIRECTORY, NULL, 0, FReq_ModCurPathU);
 #else
@@ -2527,7 +2335,7 @@ void showDiskOpScreen(void)
 	if (editor.diskOpReadOnOpen)
 	{
 		editor.diskOpReadOnOpen = false;
-		diskOp_StartDirReadThread();
+		editor.diskOpReadDir = true;
 	}
 }
 
@@ -2546,10 +2354,11 @@ void hideDiskOpScreen(void)
 	hidePushButton(PB_DISKOP_EXIT);
 	hidePushButton(PB_DISKOP_PARENT);
 	hidePushButton(PB_DISKOP_ROOT);
-	hidePushButton(PB_DISKOP_SHOW_ALL);
 	hidePushButton(PB_DISKOP_SET_PATH);
 	hidePushButton(PB_DISKOP_LIST_UP);
 	hidePushButton(PB_DISKOP_LIST_DOWN);
+
+	hideCheckBox(CB_DISKOP_SHOW_ALL);
 
 	hideScrollBar(SB_DISKOP_LIST);
 	hideTextBox(TB_DISKOP_FILENAME);
@@ -2567,7 +2376,7 @@ void exitDiskOpScreen(void)
 {
 	hideDiskOpScreen();
 	ui.oldTopLeftScreen = 0; // disk op. ignores previously opened top screens
-	showTopScreen(true);
+	showTopScreen(RESTORE_SCREENS);
 }
 
 void toggleDiskOpScreen(void)
@@ -2595,7 +2404,7 @@ void pbDiskOpListUp(void)
 
 void pbDiskOpListDown(void)
 {
-	if (FReq_DirPos < FReq_FileCount - DISKOP_ENTRY_NUM && FReq_FileCount > DISKOP_ENTRY_NUM)
+	if (FReq_DirPos < FReq_FileCount-DISKOP_ENTRY_NUM && FReq_FileCount > DISKOP_ENTRY_NUM)
 		scrollBarScrollDown(SB_DISKOP_LIST, 1);
 }
 
@@ -2613,9 +2422,9 @@ void pbDiskOpRoot(void)
 #endif
 }
 
-void pbDiskOpShowAll(void)
+void cbDiskOpAllFiles(void)
 {
-	FReq_ShowAllFiles = true;
+	FReq_ShowAllFiles ^= 1;
 	editor.diskOpReadDir = true; // refresh dir
 }
 
@@ -2667,7 +2476,6 @@ void pbDiskOpRefresh(void)
 }
 
 #ifdef __EMSCRIPTEN__
-// JavaScript-accessible function to refresh the module directory
 EMSCRIPTEN_KEEPALIVE void refreshModuleDirectory(void)
 {
 	pbDiskOpRefresh();

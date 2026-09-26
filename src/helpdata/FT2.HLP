@@ -33,6 +33,7 @@
 >- Scream Tracker 3 modules. (S3M)
 >- Scream Tracker 2 modules. (STM)
 >- DIGI Booster (non-Pro) modules. (DIGI)
+>- MikMod "UN05" XM modules. (BEM)
 
 @X040@C001Abysmal (super broken) module support:
 >@X060@C002
@@ -42,10 +43,13 @@
 >@X060@C002
 >- Gravis Ultrasound Patches, PAT.
 >- SMP/SAM/RAW/SND data files, signed and unsigned.
->- WAV files.
->- Amiga IFF.
->- Apple AIFF.
->- Super Nintendo BRR files.
+>- Amiga IFF
+>- WAV files
+>- AIFF files
+>- FLAC files
+>- OGG files
+>- MP3 files
+>- Super Nintendo BRR files
 
 @X040@C001FT2 introduces several new file formats:
 >@X060@C002
@@ -560,6 +564,11 @@ windows) with a short description.
 The BPM setting defines how fast (ticks/second) the music player
 will run. 125 BPM <-> 50 Hz.
 >Number of player ticks/second = BPM*2/5
+>
+>Note: Original FT2 has some precision loss in the way it calculates
+the actual song tempo based on the BPM, and the FT2 clone
+attempts to simulate this. If you want perfectly accurate BPM
+tempos, check out the "Precise BPM" option in Config -> Audio.
 
 >@X040@C001Spd, Speed:
 >@X060@C002
@@ -793,16 +802,6 @@ changed with respect to the resampling rate.
 By pressing the right mouse button in the sample window, you can
 draw your waveforms manually.
 
-@X020@C001WAV export:
->
->@X040@C001Imprecise BPM (FT2):
->@X060@C002
-The song BPM precision in original FT2 is not exact. Tick this box
-to use the same imprecise BPM as original FT2. It will be a fraction
-off, but the WAV output will have the same length as the output
-from FT2. This setting only affects WAV export, and not tracker
-playback.
-
 @X020@C001Configuration:
 >
 >@X040@C001Auto save:
@@ -820,20 +819,14 @@ more dull it sounds. In such cases, a worse interpolator may allow
 for more "fun" listening by allowing some aliasing.
 >
 >@X052@C001No interpolation:
->@X060@C002Also known as "nearest neighbor". The absolute worst option, but
-may be preferred by some people when playing chiptune styled
-tunes. Be prepared for a ton of aliasing (distortion).
+>@X060@C002The absolute worst option, but may be preferred by some people
+when playing chiptune styled tunes. Be prepared for a ton of
+aliasing (distortion).
 
 >@X052@C001Linear (FT2):
 >@X060@C002Same interpolator as original Fasttracker II. Not a particularly good
 option, but may be nostalgic to a lot of people, including those that
 used a Gravis Ultrasound sound card.
-
->@X052@C001Quadratic spline:
->@X060@C0023-point quadratic spline interpolation. If you prefer the soft sound
-of linear interpolation, but want just a tad bit more treble, then this
-may be a good option. Like linear interpolation, this one isn't too
-harsh on lo-fi samples.
 
 >@X052@C001Cubic spline:
 >@X060@C0024-point cubic Hermite spline interpolation. A good trade-off between
@@ -853,6 +846,13 @@ aliasing and more sharpness, but even more filtered/dull sound on
 lo-fi samples. if you only use (or play modules with) hi-fi samples,
 then this is going to give the best quality and sharpness.
 >
+
+>@X040@C001Precise BPM:
+>@X060@C002
+Original FT2 has some precision loss in the way it calculates the
+song tempo (based on the tracker BPM value). Enabling this will
+disable FT2 BPM simulation, so that the BPM value you set is the
+exact BPM tempo you get.
 
 >@X040@C001Volume ramping:
 >@X060@C002
@@ -929,6 +929,14 @@ END
 ;***************************************************************************
 ;***************************************************************************
 @LProblems/FAQ
+>@X020
+>@C001Q: The pattern editor layout is different than FT2! I don't like it!
+>@C002A: Go to Config -> Miscellaneous, enable "Original FT2 pattern layout"
+>@X020
+>@C001Q: The song tempo (BPM) is not precise! It drifts over time...
+>@C002A: This is intentional to match the BPM precision loss in original FT2
+>@X035when used with an SB16 at max mixing rate (44000Hz).
+>@X035If you want precise BPM, enable "Precise BPM" in Config -> Audio.
 >@X020
 >@C001Q: How can I toggle fullscreen mode?
 >@C002A: Press Alt+Enter (Ctrl+Cmd+F also works on Mac)

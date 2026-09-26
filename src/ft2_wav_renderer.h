@@ -3,10 +3,10 @@
 #include <stdint.h>
 #include "ft2_header.h"
 
-#define MIN_WAV_RENDER_FREQ 44100
+#define MIN_WAV_RENDER_FREQ 8000
 #define MAX_WAV_RENDER_FREQ 384000
 
-void cbToggleWavRenderBPMMode(void);
+void cbToggleWavRenderIndividualTracks(void);
 void setWavRenderFrequency(int32_t freq);
 void setWavRenderBitDepth(uint8_t bitDepth);
 void updateWavRendererSettings(void);

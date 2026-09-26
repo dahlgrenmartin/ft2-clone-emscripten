@@ -34,6 +34,7 @@ void changeFilenameExt(char *name, char *ext, int32_t nameMaxLen);
 void diskOpChangeFilenameExt(char *ext);
 void freeDiskOp(void);
 bool setupDiskOp(void);
+void resetDiskOpModuleFilename(void);
 void diskOpSetFilename(uint8_t type, UNICHAR *pathU);
 void sanitizeFilename(const char *src);
 bool diskOpGoParent(void);
@@ -52,7 +53,7 @@ void sbDiskOpSetPos(uint32_t pos);
 void pbDiskOpListUp(void);
 void pbDiskOpListDown(void);
 void pbDiskOpParent(void);
-void pbDiskOpShowAll(void);
+void cbDiskOpAllFiles(void);
 #ifdef _WIN32
 void pbDiskOpDrive1(void);
 void pbDiskOpDrive2(void);
@@ -84,7 +85,6 @@ void rbDiskOpSmpSaveIff(void);
 void trimEntryName(char *name, bool isDir);
 void createFileOverwriteText(char *filename, char *buffer);
 bool fileExistsAnsi(char *str);
-
 #ifdef __EMSCRIPTEN__
 void syncPersistentStorage(bool load);
 #endif

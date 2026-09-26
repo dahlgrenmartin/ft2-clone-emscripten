@@ -7,6 +7,13 @@
 #define SAMPLE_AREA_WIDTH 632
 #define SAMPLE_AREA_Y_CENTER 250
 
+enum
+{
+	// for writeSample()
+	FORCE_SAMPLE_REDRAW = true,
+	DONT_FORCE_SAMPLE_REDRAW = false
+};
+
 // allocs sample with proper alignment and padding for branchless resampling interpolation
 bool allocateSmpData(sample_t *s, int32_t length, bool sample16Bit);
 bool allocateSmpDataPtr(smpPtr_t *sp, int32_t length, bool sample16Bit);
@@ -25,7 +32,6 @@ void fixSample(sample_t *s); // modifies samples before index 0, and after loop/
 void unfixSample(sample_t *s); // restores samples after loop/end
 void clearSample(void);
 void clearCopyBuffer(void);
-int32_t getSampleMiddleCRate(sample_t *s);
 int32_t getSampleRangeStart(void);
 int32_t getSampleRangeEnd(void);
 int32_t getSampleRangeLength(void);

@@ -167,7 +167,7 @@ static instr_t *getCurDispInstr(void)
 	return instr[editor.curInstr];
 }
 
-static int32_t SDLCALL copyInstrThread(void *ptr)
+static int32_t copyInstrThread(void *ptr)
 {
 	const int16_t dstIns = editor.curInstr;
 	const int16_t srcIns = editor.srcInstr;
@@ -234,7 +234,7 @@ void copyInstr(void) // dstInstr = srcInstr
 		return;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(copyInstrThread, NULL, NULL);
+	thread = SDL_CreateThread(copyInstrThread, "instrument copy thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -267,7 +267,7 @@ void xchgInstr(void) // dstInstr <-> srcInstr
 static void drawMIDICh(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->midiChannel <= 15);
+	ASSERT(ins->midiChannel <= 15);
 	const uint8_t val = ins->midiChannel + 1;
 	textOutFixed(156, 132, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[val]);
 }
@@ -275,14 +275,14 @@ static void drawMIDICh(void)
 static void drawMIDIPrg(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->midiProgram <= 127);
+	ASSERT(ins->midiProgram <= 127);
 	textOutFixed(149, 146, PAL_FORGRND, PAL_DESKTOP, dec3StrTab[ins->midiProgram]);
 }
 
 static void drawMIDIBend(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->midiBend <= 36);
+	ASSERT(ins->midiBend <= 36);
 	textOutFixed(156, 160, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[ins->midiBend]);
 }
 
@@ -327,7 +327,7 @@ void sbMidiChPos(uint32_t pos)
 	instr_t *ins = instr[editor.curInstr];
 	if (ins == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_EXT_MIDI_CH, 0, false);
+		setScrollBarPos(SB_INST_EXT_MIDI_CH, 0, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -344,7 +344,7 @@ void sbMidiPrgPos(uint32_t pos)
 	instr_t *ins = instr[editor.curInstr];
 	if (ins == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_EXT_MIDI_PRG, 0, false);
+		setScrollBarPos(SB_INST_EXT_MIDI_PRG, 0, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -361,7 +361,7 @@ void sbMidiBendPos(uint32_t pos)
 	instr_t *ins = instr[editor.curInstr];
 	if (ins == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_EXT_MIDI_BEND, 0, false);
+		setScrollBarPos(SB_INST_EXT_MIDI_BEND, 0, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -412,42 +412,42 @@ void updateNewInstrument(void)
 static void drawVolEnvSus(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->volEnvSustain < 100);
+	ASSERT(ins->volEnvSustain < 100);
 	textOutFixed(382, 206, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[ins->volEnvSustain]);
 }
 
 static void drawVolEnvRepS(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->volEnvLoopStart < 100);
+	ASSERT(ins->volEnvLoopStart < 100);
 	textOutFixed(382, 233, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[ins->volEnvLoopStart]);
 }
 
 static void drawVolEnvRepE(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->volEnvLoopEnd < 100);
+	ASSERT(ins->volEnvLoopEnd < 100);
 	textOutFixed(382, 247, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[ins->volEnvLoopEnd]);
 }
 
 static void drawPanEnvSus(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->panEnvSustain < 100);
+	ASSERT(ins->panEnvSustain < 100);
 	textOutFixed(382, 293, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[ins->panEnvSustain]);
 }
 
 static void drawPanEnvRepS(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->panEnvLoopStart < 100);
+	ASSERT(ins->panEnvLoopStart < 100);
 	textOutFixed(382, 320, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[ins->panEnvLoopStart]);
 }
 
 static void drawPanEnvRepE(void)
 {
 	instr_t *ins = getCurDispInstr();
-	assert(ins->panEnvLoopEnd < 100);
+	ASSERT(ins->panEnvLoopEnd < 100);
 	textOutFixed(382, 334, PAL_FORGRND, PAL_DESKTOP, dec2StrTab[ins->panEnvLoopEnd]);
 }
 
@@ -473,35 +473,25 @@ static void drawPanning(void)
 	hexOutBg(505, 191, PAL_FORGRND, PAL_DESKTOP, s->panning, 2);
 }
 
-void drawC4Rate(void)
+void drawSampleC4Hz(void)
 {
-	fillRect(472, 299, 64, 8, PAL_DESKTOP);
+	char str[16];
 
-	double dC4Hz = 0.0;
+	fillRect(472, 299, 56, 8, PAL_DESKTOP);
+
+	int32_t C4Hz = 0;
 	if (editor.curInstr != 0)
 	{
 		instr_t *ins = instr[editor.curInstr];
 		if (ins != NULL)
-			dC4Hz = getSampleC4Rate(&ins->smp[editor.curSmp]);
+		{
+			C4Hz = getSampleC4Hz(&ins->smp[editor.curSmp]);
+			if (C4Hz > 999999)
+				C4Hz = 999999;
+		}
 	}
-
-	if (dC4Hz <= 0.0) // can happen in several cases
-	{
-		textOut(472, 299, PAL_FORGRND, "0Hz");
-		return;
-	}
-
-	// display rate with as many digits as we can fit
-	char str[32];
-	if (dC4Hz < 1000.0)
-		sprintf(str, "%.3fHz", dC4Hz);
-	else if (dC4Hz < 10000.0)
-		sprintf(str, "%.2fHz", dC4Hz);
-	else if (dC4Hz < 100000.0)
-		sprintf(str, "%.1fHz", dC4Hz);
-	else
-		sprintf(str, "%dHz", (int32_t)(dC4Hz + 0.5)); // rounded
-
+	
+	sprintf(str, "%dHz", C4Hz);
 	textOut(472, 299, PAL_FORGRND, str);
 }
 
@@ -790,7 +780,7 @@ void relativeNoteOctUp(void)
 		s->relativeNote = 71;
 
 	drawRelativeNote();
-	drawC4Rate();
+	drawSampleC4Hz();
 	setSongModifiedFlag();
 }
 
@@ -807,7 +797,7 @@ void relativeNoteOctDown(void)
 		s->relativeNote = -48;
 
 	drawRelativeNote();
-	drawC4Rate();
+	drawSampleC4Hz();
 	setSongModifiedFlag();
 }
 
@@ -822,7 +812,7 @@ void relativeNoteUp(void)
 	{
 		s->relativeNote++;
 		drawRelativeNote();
-		drawC4Rate();
+		drawSampleC4Hz();
 		setSongModifiedFlag();
 	}
 }
@@ -838,7 +828,7 @@ void relativeNoteDown(void)
 	{
 		s->relativeNote--;
 		drawRelativeNote();
-		drawC4Rate();
+		drawSampleC4Hz();
 		setSongModifiedFlag();
 	}
 }
@@ -1308,9 +1298,9 @@ void setVolumeScroll(uint32_t pos)
 	if (instr[editor.curInstr] == NULL || editor.curInstr == 0)
 	{
 		if (editor.curInstr == 0 && editor.curSmp != 0)
-			setScrollBarPos(SB_INST_VOL, 0x40, false);
+			setScrollBarPos(SB_INST_VOL, 0x40, DONT_TRIGGER_CALLBACK);
 		else
-			setScrollBarPos(SB_INST_VOL, 0, false);
+			setScrollBarPos(SB_INST_VOL, 0x00, DONT_TRIGGER_CALLBACK);
 
 		return;
 	}
@@ -1328,7 +1318,7 @@ void setPanningScroll(uint32_t pos)
 {
 	if (instr[editor.curInstr] == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_PAN, 0x80, false);
+		setScrollBarPos(SB_INST_PAN, 0x80, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -1345,7 +1335,7 @@ void setFinetuneScroll(uint32_t pos)
 {
 	if (instr[editor.curInstr] == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_FTUNE, 128, false); // finetune 0
+		setScrollBarPos(SB_INST_FTUNE, 128, DONT_TRIGGER_CALLBACK); // finetune 0
 		return;
 	}
 
@@ -1354,7 +1344,7 @@ void setFinetuneScroll(uint32_t pos)
 	{
 		s->finetune = (int8_t)(pos - 128);
 		drawFineTune();
-		drawC4Rate();
+		drawSampleC4Hz();
 		setSongModifiedFlag();
 	}
 }
@@ -1364,13 +1354,13 @@ void setFadeoutScroll(uint32_t pos)
 	instr_t *ins = instr[editor.curInstr];
 	if (ins == NULL)
 	{
-		setScrollBarPos(SB_INST_FADEOUT, 0, false);
+		setScrollBarPos(SB_INST_FADEOUT, 0x00, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
 	if (editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_FADEOUT, 0x80, false);
+		setScrollBarPos(SB_INST_FADEOUT, 0x80, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -1387,7 +1377,7 @@ void setVibSpeedScroll(uint32_t pos)
 	instr_t *ins = instr[editor.curInstr];
 	if (ins == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_VIBSPEED, 0, false);
+		setScrollBarPos(SB_INST_VIBSPEED, 0, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -1404,7 +1394,7 @@ void setVibDepthScroll(uint32_t pos)
 	instr_t *ins = instr[editor.curInstr];
 	if (ins == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_VIBDEPTH, 0, false);
+		setScrollBarPos(SB_INST_VIBDEPTH, 0, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -1421,7 +1411,7 @@ void setVibSweepScroll(uint32_t pos)
 	instr_t *ins = instr[editor.curInstr];
 	if (ins == NULL || editor.curInstr == 0)
 	{
-		setScrollBarPos(SB_INST_VIBSWEEP, 0, false);
+		setScrollBarPos(SB_INST_VIBSWEEP, 0, DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
@@ -1577,7 +1567,7 @@ void cbPEnvLoop(void)
 
 static void pianoNumberOut(uint16_t xPos, uint16_t yPos, uint8_t fgPalette, uint8_t bgPalette, uint8_t val)
 {
-	assert(val <= 0xF);
+	ASSERT(val <= 0xF);
 
 	const uint32_t fg = video.palette[fgPalette];
 	const uint32_t bg = video.palette[bgPalette];
@@ -2192,11 +2182,11 @@ void updateInstEditor(void)
 	if (ui.instEditorExtShown)
 	{
 		checkBoxes[CB_INST_EXT_MIDI].checked = ins->midiOn ? true : false;
-		checkBoxes[CB_INST_EXT_MUTE].checked = ins->mute ? true : false;
+		checkBoxes[CB_INST_EXT_MUTE].checked = ins->mute   ? true : false;
 
-		setScrollBarPos(SB_INST_EXT_MIDI_CH, ins->midiChannel, false);
-		setScrollBarPos(SB_INST_EXT_MIDI_PRG, ins->midiProgram, false);
-		setScrollBarPos(SB_INST_EXT_MIDI_BEND, ins->midiBend, false);
+		setScrollBarPos(SB_INST_EXT_MIDI_CH,   ins->midiChannel, DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(SB_INST_EXT_MIDI_PRG,  ins->midiProgram, DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(SB_INST_EXT_MIDI_BEND, ins->midiBend,    DONT_TRIGGER_CALLBACK);
 
 		drawCheckBox(CB_INST_EXT_MIDI);
 		drawCheckBox(CB_INST_EXT_MUTE);
@@ -2222,17 +2212,17 @@ void updateInstEditor(void)
 	drawVibSpeed();
 	drawVibDepth();
 	drawVibSweep();
-	drawC4Rate();
+	drawSampleC4Hz();
 	drawRelativeNote();
 
 	// set scroll bars
-	setScrollBarPos(SB_INST_VOL, s->volume, false);
-	setScrollBarPos(SB_INST_PAN, s->panning, false);
-	setScrollBarPos(SB_INST_FTUNE, 128 + s->finetune, false);
-	setScrollBarPos(SB_INST_FADEOUT, ins->fadeout, false);
-	setScrollBarPos(SB_INST_VIBSPEED, ins->autoVibRate, false);
-	setScrollBarPos(SB_INST_VIBDEPTH, ins->autoVibDepth, false);
-	setScrollBarPos(SB_INST_VIBSWEEP, ins->autoVibSweep, false);
+	setScrollBarPos(SB_INST_VOL,      s->volume,         DONT_TRIGGER_CALLBACK);
+	setScrollBarPos(SB_INST_PAN,      s->panning,        DONT_TRIGGER_CALLBACK);
+	setScrollBarPos(SB_INST_FTUNE,    128 + s->finetune, DONT_TRIGGER_CALLBACK);
+	setScrollBarPos(SB_INST_FADEOUT,  ins->fadeout,      DONT_TRIGGER_CALLBACK);
+	setScrollBarPos(SB_INST_VIBSPEED, ins->autoVibRate,  DONT_TRIGGER_CALLBACK);
+	setScrollBarPos(SB_INST_VIBDEPTH, ins->autoVibDepth, DONT_TRIGGER_CALLBACK);
+	setScrollBarPos(SB_INST_VIBSWEEP, ins->autoVibSweep, DONT_TRIGGER_CALLBACK);
 
 	// set radio buttons
 
@@ -2650,17 +2640,19 @@ void drawInstEditorExt(void)
 	{
 		checkBoxes[CB_INST_EXT_MIDI].checked = false;
 		checkBoxes[CB_INST_EXT_MUTE].checked = false;
-		setScrollBarPos(SB_INST_EXT_MIDI_CH, 0, false);
-		setScrollBarPos(SB_INST_EXT_MIDI_PRG, 0, false);
-		setScrollBarPos(SB_INST_EXT_MIDI_BEND, 0, false);
+
+		setScrollBarPos(SB_INST_EXT_MIDI_CH,   0, DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(SB_INST_EXT_MIDI_PRG,  0, DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(SB_INST_EXT_MIDI_BEND, 0, DONT_TRIGGER_CALLBACK);
 	}
 	else
 	{
 		checkBoxes[CB_INST_EXT_MIDI].checked = ins->midiOn ? true : false;
-		checkBoxes[CB_INST_EXT_MUTE].checked = ins->mute ? true : false;
-		setScrollBarPos(SB_INST_EXT_MIDI_CH, ins->midiChannel, false);
-		setScrollBarPos(SB_INST_EXT_MIDI_PRG, ins->midiProgram, false);
-		setScrollBarPos(SB_INST_EXT_MIDI_BEND, ins->midiBend, false);
+		checkBoxes[CB_INST_EXT_MUTE].checked = ins->mute   ? true : false;
+
+		setScrollBarPos(SB_INST_EXT_MIDI_CH,   ins->midiChannel, DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(SB_INST_EXT_MIDI_PRG,  ins->midiProgram, DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(SB_INST_EXT_MIDI_BEND, ins->midiBend,    DONT_TRIGGER_CALLBACK);
 	}
 
 	showCheckBox(CB_INST_EXT_MIDI);
@@ -2688,7 +2680,7 @@ void showInstEditorExt(void)
 		exitPatternEditorExtended();
 
 	hideTopScreen();
-	showTopScreen(false);
+	showTopScreen(DONT_RESTORE_SCREENS);
 
 	ui.instEditorExtShown = true;
 	ui.scopesShown = false;
@@ -2923,7 +2915,7 @@ bool testInstrSwitcherMouseDown(void)
 		return testInstrSwitcherNormal();
 }
 
-static int32_t SDLCALL saveInstrThread(void *ptr)
+static int32_t saveInstrThread(void *ptr)
 {
 	xiHdr_t ih;
 	sample_t *s;
@@ -3097,7 +3089,7 @@ void saveInstr(UNICHAR *filenameU, int16_t insNum)
 	UNICHAR_STRCPY(editor.tmpFilenameU, filenameU);
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(saveInstrThread, NULL, NULL);
+	thread = SDL_CreateThread(saveInstrThread, "instrument save thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -3113,7 +3105,7 @@ static int16_t getPATNote(uint32_t freq)
 	return (int16_t)round(NOTE_C4 + dNote);
 }
 
-static int32_t SDLCALL loadInstrThread(void *ptr)
+static int32_t loadInstrThread(void *ptr)
 {
 	int16_t a, b;
 	int32_t i, j, numLoadedSamples;
@@ -3400,9 +3392,9 @@ static int32_t SDLCALL loadInstrThread(void *ptr)
 				if (patWave_h.flags & 4) // loop enabled?
 				{
 					if (patWave_h.flags & 8)
-						s->flags |= LOOP_BIDI;
+						s->flags |= LOOP_PINGPONG;
 					else
-						s->flags |= LOOP_FWD;
+						s->flags |= LOOP_FORWARD;
 				}
 
 				s->panning = ((patWave_h.balance << 4) & 0xF0) | (patWave_h.balance & 0xF); // 0..15 -> 0..255
@@ -3526,7 +3518,7 @@ void loadInstr(UNICHAR *filenameU)
 	{
 		// load as instrument
 		mouseAnimOn();
-		thread = SDL_CreateThread(loadInstrThread, NULL, NULL);
+		thread = SDL_CreateThread(loadInstrThread, "instrument load thread", NULL);
 		if (thread == NULL)
 		{
 			okBox(0, "System message", "Couldn't create thread!", NULL);

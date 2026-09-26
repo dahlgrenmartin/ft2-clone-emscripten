@@ -27,9 +27,8 @@
 #include "ft2_structs.h"
 
 static volatile bool stopThread;
-
-static int8_t smpEd_RelReSmp, mix_Balance = 50;
 static bool echo_AddMemory, exitFlag, outOfMemory;
+static int8_t smpEd_RelReSmp, mix_Balance = 50;
 static int16_t echo_nEcho = 1, echo_VolChange = 30;
 static int32_t echo_Distance = 0x100;
 static double dVol_StartVol = 100.0, dVol_EndVol = 100.0;
@@ -55,7 +54,7 @@ static void windowClose(bool rewriteSample)
 	SDL_EventState(SDL_DROPFILE, SDL_ENABLE);
 
 	if (exitFlag || rewriteSample)
-		writeSample(true);
+		writeSample(FORCE_SAMPLE_REDRAW);
 	else
 		updateNewSample();
 
@@ -80,7 +79,7 @@ static void pbResampleTonesUp(void)
 		smpEd_RelReSmp++;
 }
 
-static int32_t SDLCALL resampleThread(void *ptr)
+static int32_t resampleThread(void *ptr)
 {
 	smpPtr_t sp;
 
@@ -172,7 +171,7 @@ static int32_t SDLCALL resampleThread(void *ptr)
 static void pbDoResampling(void)
 {
 	mouseAnimOn();
-	thread = SDL_CreateThread(resampleThread, NULL, NULL);
+	thread = SDL_CreateThread(resampleThread, "resample thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -328,7 +327,7 @@ void pbSampleResample(void)
 		handleRedrawing();
 
 		drawResampleBox();
-		setScrollBarPos(0, smpEd_RelReSmp + 36, false);
+		setScrollBarPos(0, smpEd_RelReSmp + 36, DONT_TRIGGER_CALLBACK);
 		drawCheckBox(0);
 		for (i = 0; i < 4; i++) drawPushButton(i);
 		drawScrollBar(0);
@@ -404,7 +403,7 @@ static void pbEchoFadeoutUp(void)
 		echo_VolChange++;
 }
 
-static int32_t SDLCALL createEchoThread(void *ptr)
+static int32_t createEchoThread(void *ptr)
 {
 	smpPtr_t sp;
 
@@ -489,11 +488,8 @@ static int32_t SDLCALL createEchoThread(void *ptr)
 					break;
 			}
 
-			DROUND(dSmpOut);
-
-			int32_t smp32 = (int32_t)dSmpOut;
-			CLAMP16(smp32);
-			writePtr16[writeIdx++] = (int16_t)smp32;
+			int32_t smp32 = (int32_t)round(dSmpOut);
+			writePtr16[writeIdx++] = (int16_t)(CLAMP(smp32, INT16_MIN, INT16_MAX));
 		}
 	}
 	else // 8-bit
@@ -519,11 +515,8 @@ static int32_t SDLCALL createEchoThread(void *ptr)
 					break;
 			}
 
-			DROUND(dSmpOut);
-
-			int32_t smp32 = (int32_t)dSmpOut;
-			CLAMP8(smp32);
-			writePtr8[writeIdx++] = (int8_t)smp32;
+			int32_t smp32 = (int32_t)round(dSmpOut);
+			writePtr8[writeIdx++] = (int8_t)(CLAMP(smp32, INT8_MIN, INT8_MAX));
 		}
 	}
 
@@ -556,7 +549,7 @@ static void pbCreateEcho(void)
 	stopThread = false;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(createEchoThread, NULL, NULL);
+	thread = SDL_CreateThread(createEchoThread, "echo thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -593,14 +586,14 @@ static void drawEchoBox(void)
 	textOutShadow(177, 254, PAL_FORGRND, PAL_BUTTON2, "Fade out");
 	textOutShadow(192, 270, PAL_FORGRND, PAL_BUTTON2, "Add memory to sample");
 
-	assert(echo_nEcho <= 64);
+	ASSERT(echo_nEcho <= 64);
 	charOut(315 + (2 * 7), 226, PAL_FORGRND, '0' + (char)(echo_nEcho / 10));
 	charOut(315 + (3 * 7), 226, PAL_FORGRND, '0' + (echo_nEcho % 10));
 
-	assert(echo_Distance <= 0x4000);
+	ASSERT(echo_Distance <= 0x4000);
 	hexOut(308, 240, PAL_FORGRND, echo_Distance << 4, 5);
 
-	assert(echo_VolChange <= 100);
+	ASSERT(echo_VolChange <= 100);
 	textOutFixed(312, 254, PAL_FORGRND, PAL_BUTTONS, dec3StrTab[echo_VolChange]);
 
 	charOutShadow(313 + (3 * 7), 254, PAL_FORGRND, PAL_BUTTON2, '%');
@@ -786,9 +779,9 @@ void pbSampleEcho(void)
 		handleRedrawing();
 
 		drawEchoBox();
-		setScrollBarPos(0, echo_nEcho, false);
-		setScrollBarPos(1, echo_Distance, false);
-		setScrollBarPos(2, echo_VolChange, false);
+		setScrollBarPos(0, echo_nEcho,     DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(1, echo_Distance,  DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(2, echo_VolChange, DONT_TRIGGER_CALLBACK);
 		drawCheckBox(0);
 		for (uint16_t i = 0; i < 8; i++) drawPushButton(i);
 		for (uint16_t i = 0; i < 3; i++) drawScrollBar(i);
@@ -806,7 +799,7 @@ void pbSampleEcho(void)
 		okBox(0, "System message", "Not enough memory!", NULL);
 }
 
-static int32_t SDLCALL mixThread(void *ptr)
+static int32_t mixThread(void *ptr)
 {
 	smpPtr_t sp;
 
@@ -943,7 +936,7 @@ static int32_t SDLCALL mixThread(void *ptr)
 static void pbMix(void)
 {
 	mouseAnimOn();
-	thread = SDL_CreateThread(mixThread, NULL, NULL);
+	thread = SDL_CreateThread(mixThread, "sample mix thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -995,7 +988,7 @@ static void drawMixSampleBox(void)
 
 	textOutShadow(198, 246, PAL_FORGRND, PAL_BUTTON2, "Mixing balance");
 
-	assert((mix_Balance >= 0) && (mix_Balance <= 100));
+	ASSERT((mix_Balance >= 0) && (mix_Balance <= 100));
 	textOutFixed(299, 246, PAL_FORGRND, PAL_BUTTONS, dec3StrTab[mix_Balance]);
 }
 
@@ -1088,7 +1081,7 @@ void pbSampleMix(void)
 		handleRedrawing();
 
 		drawMixSampleBox();
-		setScrollBarPos(0, mix_Balance, false);
+		setScrollBarPos(0, mix_Balance, DONT_TRIGGER_CALLBACK);
 		for (i = 0; i < 4; i++) drawPushButton(i);
 		drawScrollBar(0);
 
@@ -1162,7 +1155,7 @@ static void pbSampEndVolUp(void)
 	dVol_EndVol = floor(dVol_EndVol);
 }
 
-static int32_t SDLCALL applyVolumeThread(void *ptr)
+static int32_t applyVolumeThread(void *ptr)
 {
 	int32_t x1, x2;
 
@@ -1210,8 +1203,7 @@ static int32_t SDLCALL applyVolumeThread(void *ptr)
 			for (int32_t i = 0; i < len; i++)
 			{
 				int32_t smp32 = (int32_t)((int32_t)ptr16[i] * dVol);
-				CLAMP16(smp32);
-				ptr16[i] = (int16_t)smp32;
+				ptr16[i] = (int16_t)(CLAMP(smp32, INT16_MIN, INT16_MAX));
 
 				dVol += dVolDelta;
 			}
@@ -1221,8 +1213,7 @@ static int32_t SDLCALL applyVolumeThread(void *ptr)
 			for (int32_t i = 0; i < len; i++)
 			{
 				int32_t smp32 = (int32_t)((int32_t)ptr16[i] * dVol);
-				CLAMP16(smp32);
-				ptr16[i] = (int16_t)smp32;
+				ptr16[i] = (int16_t)(CLAMP(smp32, INT16_MIN, INT16_MAX));
 			}
 		}
 	}
@@ -1234,8 +1225,7 @@ static int32_t SDLCALL applyVolumeThread(void *ptr)
 			for (int32_t i = 0; i < len; i++)
 			{
 				int32_t smp32 = (int32_t)((int32_t)ptr8[i] * dVol);
-				CLAMP8(smp32);
-				ptr8[i] = (int8_t)smp32;
+				ptr8[i] = (int8_t)(CLAMP(smp32, INT8_MIN, INT8_MAX));
 
 				dVol += dVolDelta;
 			}
@@ -1245,8 +1235,7 @@ static int32_t SDLCALL applyVolumeThread(void *ptr)
 			for (int32_t i = 0; i < len; i++)
 			{
 				int32_t smp32 = (int32_t)((int32_t)ptr8[i] * dVol);
-				CLAMP8(smp32);
-				ptr8[i] = (int8_t)smp32;
+				ptr8[i] = (int8_t)(CLAMP(smp32, INT8_MIN, INT8_MAX));
 			}
 		}
 	}
@@ -1273,7 +1262,7 @@ static void pbApplyVolume(void)
 	}
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(applyVolumeThread, NULL, NULL);
+	thread = SDL_CreateThread(applyVolumeThread, "sample modification thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -1283,7 +1272,7 @@ static void pbApplyVolume(void)
 	SDL_DetachThread(thread);
 }
 
-static int32_t SDLCALL getMaxScaleThread(void *ptr)
+static int32_t getMaxScaleThread(void *ptr)
 {
 	int32_t x1, x2;
 
@@ -1326,7 +1315,7 @@ static int32_t SDLCALL getMaxScaleThread(void *ptr)
 	** we need to unfix the fixed interpolation sample before scanning,
 	** and fix it again after we're done.
 	*/
-	bool hasLoop = GET_LOOPTYPE(s->flags) != LOOP_OFF;
+	bool hasLoop = GET_LOOPTYPE(s->flags) != LOOP_DISABLED;
 	const int32_t loopEnd = s->loopStart + s->loopLength;
 	bool fixedSampleInRange = hasLoop && (x1 <= loopEnd) && (x2 >= loopEnd);
 
@@ -1379,7 +1368,7 @@ getScaleExit:
 static void pbGetMaxScale(void)
 {
 	mouseAnimOn();
-	thread = SDL_CreateThread(getMaxScaleThread, NULL, NULL);
+	thread = SDL_CreateThread(getMaxScaleThread, "sample modification thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -1589,7 +1578,7 @@ static void setupVolumeBoxWidgets(void)
 	s->visible = true;
 	setScrollBarPageLength(0, 1);
 	setScrollBarEnd(0, 200 * 2);
-	setScrollBarPos(0, 200, false);
+	setScrollBarPos(0, 200, DONT_TRIGGER_CALLBACK);
 
 	// volume end scrollbar
 	s = &scrollBars[1];
@@ -1602,7 +1591,7 @@ static void setupVolumeBoxWidgets(void)
 	s->visible = true;
 	setScrollBarPageLength(1, 1);
 	setScrollBarEnd(1, 200 * 2);
-	setScrollBarPos(1, 200, false);
+	setScrollBarPos(1, 200, DONT_TRIGGER_CALLBACK);
 }
 
 void pbSampleVolume(void)
@@ -1640,8 +1629,8 @@ void pbSampleVolume(void)
 		const int32_t startVol = (int32_t)dVol_StartVol;
 		const int32_t endVol = (int32_t)dVol_EndVol;
 
-		setScrollBarPos(0, 200 + startVol, false);
-		setScrollBarPos(1, 200 + endVol, false);
+		setScrollBarPos(0, 200 + startVol, DONT_TRIGGER_CALLBACK);
+		setScrollBarPos(1, 200 + endVol, DONT_TRIGGER_CALLBACK);
 		for (i = 0; i < 7; i++) drawPushButton(i);
 		for (i = 0; i < 2; i++) drawScrollBar(i);
 

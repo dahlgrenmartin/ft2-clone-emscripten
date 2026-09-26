@@ -73,6 +73,7 @@ enum
 	HARDWARE_MOUSE = 2,
 	STRETCH_IMAGE = 4,
 	USE_OS_MOUSE_POINTER = 8,
+	PRECISE_BPM = 16,
 
 	// windowFlags
 	WINSIZE_AUTO = 1,
@@ -124,7 +125,7 @@ typedef struct config_t // exact FT2.CFG layout (with some modifications)
 	int16_t recMIDITranspVal;
 	uint8_t recMIDIVelocity, recMIDIAftert;
 	int16_t recMIDIVolSens;
-	uint8_t useNewAboutScreen, smpCutToBuffer, ptnCutToBuffer, killNotesOnStopPlay;
+	uint8_t ptnAlternativeLayout, smpCutToBuffer, ptnCutToBuffer, killNotesOnStopPlay;
 	uint8_t specialFlags; // was lo-byte of "ptnDefaultLen" (never used in FT2)
 	uint8_t windowFlags; // was hi-byte of "ptnDefaultLen" (never used in FT2)
 	uint8_t modulesPathLen;
@@ -205,7 +206,6 @@ void rbConfigAudio16Bit(void);
 void rbConfigAudio32BitFloat(void);
 void rbConfigAudioIntrpDisabled(void);
 void rbConfigAudioIntrpLinear(void);
-void rbConfigAudioIntrpQuadratic(void);
 void rbConfigAudioIntrpCubic(void);
 void rbConfigAudioIntrpSinc8(void);
 void rbConfigAudioIntrpSinc16(void);
@@ -241,6 +241,7 @@ void rbWinSize2x(void);
 void rbWinSize3x(void);
 void rbWinSize4x(void);
 void cbToggleAutoSaveConfig(void);
+void cbPreciseBPM(void);
 void cbConfigVolRamp(void);
 void cbConfigPattStretch(void);
 void cbConfigHexCount(void);
@@ -262,7 +263,7 @@ void cbMultiChanEdit(void);
 void cbRecKeyOff(void);
 void cbQuantization(void);
 void cbChangePattLenInsDel(void);
-void cbUseOldAboutScreen(void);
+void cbAltPatternLayout(void);
 void cbMIDIEnable(void);
 void cbMIDIRecTransp(void);
 void cbMIDIRecAllChn(void);

@@ -86,12 +86,11 @@ radioButton_t radioButtons[NUM_RADIOBUTTONS] =
 
 	// audio interpolation
 	//x,   y,   w,   group,                               funcOnUp
-	{ 390,  90, 108, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpDisabled },
-	{ 390, 104,  90, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpLinear },
-	{ 390, 118, 109, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpQuadratic },
-	{ 390, 132,  85, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpCubic },
-	{ 390, 146,  94, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpSinc8 },
-	{ 390, 160, 101, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpSinc16 },
+	{ 390,  89, 108, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpDisabled },
+	{ 390, 103,  90, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpLinear },
+	{ 390, 117,  85, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpCubic },
+	{ 390, 131,  94, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpSinc8 },
+	{ 390, 145, 101, RB_GROUP_CONFIG_AUDIO_INTERPOLATION, rbConfigAudioIntrpSinc16 },
 
 	// audio output frequency
 	//x,   y,  w,  group,                      funcOnUp
@@ -171,8 +170,8 @@ radioButton_t radioButtons[NUM_RADIOBUTTONS] =
 
 	// FILENAME SORTING
 	//x,   y,  w,  group,                    funcOnUp
-	{ 114, 15, 40, RB_GROUP_CONFIG_FILESORT, rbFileSortExt },
-	{ 114, 29, 48, RB_GROUP_CONFIG_FILESORT, rbFileSortName },
+	{ 114, 15, 75, RB_GROUP_CONFIG_FILESORT, rbFileSortExt },
+	{ 114, 29, 67, RB_GROUP_CONFIG_FILESORT, rbFileSortName },
 
 	// WINDOW SIZE
 	//x,   y,  w,  group,                    funcOnUp
@@ -224,12 +223,12 @@ radioButton_t radioButtons[NUM_RADIOBUTTONS] =
 
 void drawRadioButton(uint16_t radioButtonID)
 {
-	assert(radioButtonID < NUM_RADIOBUTTONS);
+	ASSERT(radioButtonID < NUM_RADIOBUTTONS);
 	radioButton_t *radioButton = &radioButtons[radioButtonID];
 	if (!radioButton->visible)
 		return;
 
-	assert(radioButton->x < SCREEN_W && radioButton->y < SCREEN_H);
+	ASSERT(radioButton->x < SCREEN_W && radioButton->y < SCREEN_H);
 
 	const uint8_t *gfxPtr = &bmp.radiobuttonGfx[radioButton->state*(RADIOBUTTON_W*RADIOBUTTON_H)];
 	blitFast(radioButton->x, radioButton->y, gfxPtr, RADIOBUTTON_W, RADIOBUTTON_H);
@@ -237,21 +236,21 @@ void drawRadioButton(uint16_t radioButtonID)
 
 void showRadioButton(uint16_t radioButtonID)
 {
-	assert(radioButtonID < NUM_RADIOBUTTONS);
+	ASSERT(radioButtonID < NUM_RADIOBUTTONS);
 	radioButtons[radioButtonID].visible = true;
 	drawRadioButton(radioButtonID);
 }
 
 void hideRadioButton(uint16_t radioButtonID)
 {
-	assert(radioButtonID < NUM_RADIOBUTTONS);
+	ASSERT(radioButtonID < NUM_RADIOBUTTONS);
 	radioButtons[radioButtonID].state = 0;
 	radioButtons[radioButtonID].visible = false;
 }
 
 void checkRadioButton(uint16_t radioButtonID)
 {
-	assert(radioButtonID < NUM_RADIOBUTTONS);
+	ASSERT(radioButtonID < NUM_RADIOBUTTONS);
 	const uint16_t testGroup = radioButtons[radioButtonID].group;
 
 	radioButton_t *radioButton = radioButtons;
@@ -301,7 +300,7 @@ void hideRadioButtonGroup(uint16_t radioButtonGroup)
 
 void handleRadioButtonsWhileMouseDown(void)
 {
-	assert(mouse.lastUsedObjectID >= 0 && mouse.lastUsedObjectID < NUM_RADIOBUTTONS);
+	ASSERT(mouse.lastUsedObjectID >= 0 && mouse.lastUsedObjectID < NUM_RADIOBUTTONS);
 	radioButton_t *radioButton = &radioButtons[mouse.lastUsedObjectID];
 	if (!radioButton->visible || radioButton->state == RADIOBUTTON_CHECKED)
 		return;
@@ -353,7 +352,7 @@ void testRadioButtonMouseRelease(void)
 	if (mouse.lastUsedObjectType != OBJECT_RADIOBUTTON || mouse.lastUsedObjectID == OBJECT_ID_NONE)
 		return;
 
-	assert(mouse.lastUsedObjectID < NUM_RADIOBUTTONS);
+	ASSERT(mouse.lastUsedObjectID < NUM_RADIOBUTTONS);
 	radioButton_t *radioButton = &radioButtons[mouse.lastUsedObjectID];
 	if (!radioButton->visible || radioButton->state == RADIOBUTTON_CHECKED)
 		return;

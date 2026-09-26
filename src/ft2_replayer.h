@@ -3,19 +3,22 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "ft2_unicode.h"
-#include "mixer/ft2_quadratic_spline.h"
-#include "mixer/ft2_cubic_spline.h"
 #include "mixer/ft2_windowed_sinc.h"
 
 enum
 {
-	// voice flags
-	IS_Vol = 1, // set volume
-	IS_Period = 2, // set resampling rate
-	IS_Trigger = 4, // trigger sample
-	IS_Pan = 8, // set panning
-	IS_QuickVol = 16, // 5ms volramp instead of tick ms
+	// for setSongPos()
+	DONT_RESET_SONG_TICK = false,
+	RESET_SONG_TICK = true,
 
+	// channel/voice status flags
+	CS_UPDATE_VOL = 1,
+	CF_UPDATE_PERIOD = 2,
+	CS_TRIGGER_VOICE = 4,
+	CS_UPDATE_PAN = 8,
+	CS_USE_QUICK_VOLRAMP = 16, // use 5ms vol. ramp instead of the duration of a tick
+
+	// sample loop type
 	LOOP_DISABLED = 0,
 	LOOP_FORWARD = 1,
 	LOOP_PINGPONG = 2,
@@ -38,6 +41,8 @@ enum
 	CURSOR_EFX1 = 6,
 	CURSOR_EFX2 = 7
 };
+
+#define FT2_REF_AUDIO_RATE 44000
 
 // do not touch these!
 #define MIN_BPM 32
@@ -63,9 +68,6 @@ enum
 
 enum // sample flags
 {
-	LOOP_OFF = 0,
-	LOOP_FWD = 1,
-	LOOP_BIDI = 2,
 	SAMPLE_16BIT = 16,
 	SAMPLE_STEREO = 32,
 	SAMPLE_ADPCM = 64, // not an existing flag, but used by loader
@@ -78,9 +80,9 @@ enum // envelope flags
 	ENV_LOOP    = 4
 };
 
-#define GET_LOOPTYPE(smpFlags) ((smpFlags) & (LOOP_FWD | LOOP_BIDI))
-#define DISABLE_LOOP(smpFlags) ((smpFlags) &= ~(LOOP_FWD | LOOP_BIDI))
-#define SAMPLE_LENGTH_BYTES(smp) (smp->length << !!(smp->flags & SAMPLE_16BIT))
+#define GET_LOOPTYPE(smpFlags) ((smpFlags) & (LOOP_FORWARD | LOOP_PINGPONG))
+#define DISABLE_LOOP(smpFlags) ((smpFlags) &= ~(LOOP_FORWARD | LOOP_PINGPONG))
+#define SAMPLE_LENGTH_BYTES(smp) ((smp->flags & SAMPLE_16BIT) ? (smp->length * 2) : smp->length)
 #define FINETUNE_MOD2XM(f) (((uint8_t)(f) & 0x0F) << 4)
 #define FINETUNE_XM2MOD(f) ((uint8_t)(f) >> 4)
 
@@ -240,7 +242,7 @@ typedef struct instr_t
 
 typedef struct channel_t
 {
-	bool keyOff, channelOff, mute, portaSemitoneSlides;
+	bool dontRenderThisChannel, keyOff, channelOff, mute, semitonePortaMode;
 	volatile uint8_t status, tmpStatus;
 	int8_t relativeNote, finetune;
 	uint8_t smpNum, instrNum, efxData, efx, sampleOffset, tremorParam, tremorPos;
@@ -251,14 +253,12 @@ typedef struct channel_t
 	uint8_t pitchSlideUpSpeed, pitchSlideDownSpeed, noteRetrigSpeed, noteRetrigCounter, noteRetrigVol;
 	uint8_t volColumnVol, noteNum, panEnvPos, autoVibPos, volEnvPos, realVol, oldVol, outVol;
 	uint8_t oldPan, outPan, finalPan;
-	int16_t midiPitch;
+	int16_t midiPitch, volEnvDelta, volEnvValue, panEnvDelta, panEnvValue;
 	uint16_t outPeriod, realPeriod, finalPeriod, copyOfInstrAndNote, portamentoTargetPeriod, portamentoSpeed;
 	uint16_t volEnvTick, panEnvTick, autoVibAmp, autoVibSweep;
-	uint16_t midiVibDepth;
-	int32_t fadeoutVol, fadeoutSpeed;
+	uint16_t midiVibDepth, fadeoutVol, fadeoutSpeed;
 	int32_t smpStartPos;
-
-	float fFinalVol, fVolEnvDelta, fPanEnvDelta, fVolEnvValue, fPanEnvValue;
+	float fFinalVol;
 
 	sample_t *smpPtr;
 	instr_t *instrPtr;
@@ -278,7 +278,8 @@ typedef struct song_t
 	uint64_t playbackSecondsFrac;
 } song_t;
 
-double getSampleC4Rate(sample_t *s);
+int32_t getSampleC4Hz(sample_t *s);
+void setSampleC4Hz(sample_t *s, double dC4Hz);
 
 void setNewSongPos(int32_t pos);
 
@@ -286,13 +287,11 @@ void fixString(char *str, int32_t lastChrPos); // removes leading spaces and 0x1
 void fixSongName(void);
 void fixInstrAndSampleNames(int16_t insNum);
 
-void calcReplayerVars(int32_t rate);
-void setSampleC4Hz(sample_t *s, double dC4Hz);
-void calcReplayerLogTab(void); // for linear period -> hz calculation
+void calcReplayerVars(int32_t referenceFt2AudioFreq, int32_t audioFreq);
 
-double dLinearPeriod2Hz(int32_t period);
-double dAmigaPeriod2Hz(int32_t period);
-double dPeriod2Hz(int32_t period);
+int64_t period2VoiceDelta(uint32_t period);
+int64_t period2ScopeDelta(uint32_t period);
+int32_t period2ScopeDrawDelta(uint32_t period);
 
 int32_t getPianoKey(int32_t period, int8_t finetune, int8_t relativeNote); // for piano in Instr. Ed.
 void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch);
@@ -305,13 +304,14 @@ void freeSample(int16_t insNum, int16_t smpNum);
 
 void freeAllPatterns(void);
 void updateChanNums(void);
+void calcMiscReplayerVars(void);
 bool setupReplayer(void);
 void closeReplayer(void);
 void resetMusic(void);
 void startPlaying(int8_t mode, int16_t row);
 void stopPlaying(void);
 void stopVoices(void);
-void setPos(int16_t songPos, int16_t row, bool resetTimer);
+void setSongPos(int16_t songPos, int16_t row, bool resetTick);
 void pauseMusic(void); // stops reading pattern data
 void resumeMusic(void); // starts reading pattern data
 void setSongModifiedFlag(void);
@@ -355,5 +355,5 @@ extern const uint16_t *note2PeriodLUT;
 extern int16_t patternNumRows[MAX_PATTERNS];
 extern channel_t channel[MAX_CHANNELS];
 extern song_t song;
-extern instr_t *instr[128+4];
+extern instr_t *instr[128+4]; // (extra placeholder instruments needed)
 extern note_t *pattern[MAX_PATTERNS];

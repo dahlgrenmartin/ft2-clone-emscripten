@@ -154,14 +154,12 @@ static bool saveRawSample(UNICHAR *filenameU, bool saveRangedData)
 	}
 
 	fclose(f);
-
 #ifdef __EMSCRIPTEN__
-	// Sync to persistent storage after successful save
 	syncPersistentStorage(false);
 #endif
 
 	// restore modified interpolation tap samples after loopEnd
-	bool loopEnabled = GET_LOOPTYPE(smp->flags) != LOOP_OFF;
+	bool loopEnabled = GET_LOOPTYPE(smp->flags) != LOOP_DISABLED;
 	if (loopEnabled && smp->length > smp->loopStart+smp->loopLength)
 		fileRestoreFixedSampleData(filenameU, 0, smp);
 
@@ -243,7 +241,7 @@ static bool saveIFFSample(UNICHAR *filenameU, bool saveRangedData)
 	// "VHDR" chunk
 	iffWriteChunkHeader(f, "VHDR", 20);
 
-	if (!saveRangedData && GET_LOOPTYPE(smp->flags) != LOOP_OFF)
+	if (!saveRangedData && GET_LOOPTYPE(smp->flags) != LOOP_DISABLED)
 	{
 		iffWriteUint32(f, smp->loopStart << sample16Bit); // oneShotHiSamples
 		iffWriteUint32(f, smp->loopLength << sample16Bit); // repeatHiSamples
@@ -257,7 +255,7 @@ static bool saveIFFSample(UNICHAR *filenameU, bool saveRangedData)
 	iffWriteUint32(f, 0); // samplesPerHiCycle
 
 	// samplesPerSec
-	uint32_t tmp32 = getSampleMiddleCRate(smp);
+	uint32_t tmp32 = getSampleC4Hz(smp);
 	if (tmp32 == 0 || tmp32 > 65535) tmp32 = 16726;
 	iffWriteUint16(f, (uint16_t)tmp32);
 
@@ -311,14 +309,12 @@ static bool saveIFFSample(UNICHAR *filenameU, bool saveRangedData)
 	iffWriteUint32(f, chunkLen);
 
 	fclose(f);
-
 #ifdef __EMSCRIPTEN__
-	// Sync to persistent storage after successful save
 	syncPersistentStorage(false);
 #endif
 
 	// restore modified interpolation tap samples after loopEnd
-	bool loopEnabled = GET_LOOPTYPE(smp->flags) != LOOP_OFF;
+	bool loopEnabled = GET_LOOPTYPE(smp->flags) != LOOP_DISABLED;
 	if (loopEnabled && smp->length > smp->loopStart+smp->loopLength)
 		fileRestoreFixedSampleData(filenameU, sampleDataPos, smp);
 
@@ -375,7 +371,7 @@ static bool saveWAVSample(UNICHAR *filenameU, bool saveRangedData)
 	wavHeader.subchunk1Size = 16;
 	wavHeader.audioFormat = 1;
 	wavHeader.numChannels = 1;
-	wavHeader.sampleRate = getSampleMiddleCRate(smp);
+	wavHeader.sampleRate = getSampleC4Hz(smp);
 	wavHeader.byteRate = (wavHeader.sampleRate * wavHeader.numChannels * sampleBitDepth) / 8;
 	wavHeader.blockAlign = (wavHeader.numChannels * sampleBitDepth) / 8;
 	wavHeader.bitsPerSample = sampleBitDepth;
@@ -401,7 +397,7 @@ static bool saveWAVSample(UNICHAR *filenameU, bool saveRangedData)
 		fputc(0, f); // write pad byte if chunk size is uneven
 
 	// write "smpl" chunk if loop is enabled
-	if (!saveRangedData && GET_LOOPTYPE(smp->flags) != LOOP_OFF)
+	if (!saveRangedData && GET_LOOPTYPE(smp->flags) != LOOP_DISABLED)
 	{
 		memset(&samplerChunk, 0, sizeof (samplerChunk));
 
@@ -496,14 +492,12 @@ static bool saveWAVSample(UNICHAR *filenameU, bool saveRangedData)
 	fwrite(&riffChunkSize, sizeof (int32_t), 1, f);
 
 	fclose(f);
-
 #ifdef __EMSCRIPTEN__
-	// Sync to persistent storage after successful save
 	syncPersistentStorage(false);
 #endif
 
 	// restore modified interpolation tap samples after loopEnd
-	bool loopEnabled = GET_LOOPTYPE(smp->flags) != LOOP_OFF;
+	bool loopEnabled = GET_LOOPTYPE(smp->flags) != LOOP_DISABLED;
 	if (loopEnabled && smp->length > smp->loopStart+smp->loopLength)
 		fileRestoreFixedSampleData(filenameU, sampleDataPos, smp);
 
@@ -513,7 +507,7 @@ static bool saveWAVSample(UNICHAR *filenameU, bool saveRangedData)
 	return true;
 }
 
-static int32_t SDLCALL saveSampleThread(void *ptr)
+static int32_t saveSampleThread(void *ptr)
 {
 	if (editor.tmpFilenameU == NULL)
 	{
@@ -549,7 +543,7 @@ void saveSample(UNICHAR *filenameU, bool saveAsRange)
 	UNICHAR_STRCPY(editor.tmpFilenameU, filenameU);
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(saveSampleThread, NULL, NULL);
+	thread = SDL_CreateThread(saveSampleThread, "sample save thread", NULL);
 	if (thread == NULL)
 	{
 		okBoxThreadSafe(0, "System message", "Couldn't create thread!", NULL);

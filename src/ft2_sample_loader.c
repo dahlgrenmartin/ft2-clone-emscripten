@@ -16,11 +16,16 @@
 #include "ft2_diskop.h"
 #include "ft2_structs.h"
 
-#ifdef HAS_LIBFLAC
+bool detectFLAC(FILE *f, UNICHAR *filenameU, uint32_t filenameLen);
 bool loadFLAC(FILE *f, uint32_t filesize);
-#endif
 
-bool detectBRR(FILE *f);
+bool detectOGG(FILE *f, UNICHAR *filenameU, uint32_t filenameLen);
+bool loadOGG(FILE *f, uint32_t filesize);
+
+bool detectMP3(FILE *f, UNICHAR *filenameU, uint32_t filenameLen);
+bool loadMP3(FILE *f, uint32_t filesize);
+
+bool detectBRR(FILE *f, UNICHAR *filenameU, uint32_t filenameLen);
 bool loadBRR(FILE *f, uint32_t filesize);
 
 bool loadAIFF(FILE *f, uint32_t filesize);
@@ -35,14 +40,16 @@ enum
 	FORMAT_WAV = 2,
 	FORMAT_AIFF = 3,
 	FORMAT_FLAC = 4,
-	FORMAT_BRR = 5
+	FORMAT_OGG = 5,
+	FORMAT_MP3 = 6,
+	FORMAT_BRR = 7
 };
 
 // file extensions accepted by Disk Op. in sample mode
 char *supportedSmpExtensions[] =
 {
 	"iff", "raw", "wav", "snd", "smp", "sam", "aif", "pat",
-	"aiff","flac","brr", // IMPORTANT: Remember comma after last entry!!!
+	"aiff", "flac", "ogg", "mp3", "brr", // IMPORTANT: Remember comma after last entry!
 
 	"END_OF_LIST" // do NOT move, remove or edit this line!
 };
@@ -60,7 +67,7 @@ static SDL_Thread *thread;
 static void freeTmpSample(sample_t *s);
 
 // Crude sample detection routine. These aren't always accurate detections!
-static int8_t detectSample(FILE *f)
+static int8_t detectSample(FILE *f, UNICHAR *filenameU, uint32_t filenameLen)
 {
 	uint8_t D[512];
 
@@ -70,8 +77,14 @@ static int8_t detectSample(FILE *f)
 	fread(D, 1, sizeof (D), f);
 	fseek(f, oldPos, SEEK_SET);
 
-	if (!memcmp("fLaC", &D[0], 4)) // XXX: Kinda lousy detection...
+	if (detectFLAC(f, filenameU, filenameLen))
 		return FORMAT_FLAC;
+
+	if (detectOGG(f, filenameU, filenameLen))
+		return FORMAT_OGG;
+
+	if (detectMP3(f, filenameU, filenameLen))
+		return FORMAT_MP3;
 
 	if (!memcmp("FORM", &D[0], 4) && (!memcmp("8SVX", &D[8], 4) || !memcmp("16SV", &D[8], 4)))
 		return FORMAT_IFF;
@@ -82,13 +95,13 @@ static int8_t detectSample(FILE *f)
 	if (!memcmp("FORM", &D[0], 4) && (!memcmp("AIFF", &D[8], 4) || !memcmp("AIFC", &D[8], 4)))
 		return FORMAT_AIFF;
 
-	if (detectBRR(f))
+	if (detectBRR(f, filenameU, filenameLen))
 		return FORMAT_BRR;
 
 	return FORMAT_UNKNOWN;
 }
 
-static int32_t SDLCALL loadSampleThread(void *ptr)
+static int32_t loadSampleThread(void *ptr)
 {
 	if (editor.tmpFilenameU == NULL)
 	{
@@ -103,7 +116,7 @@ static int32_t SDLCALL loadSampleThread(void *ptr)
 		goto loadError;
 	}
 
-	int8_t format = detectSample(f);
+	int8_t format = detectSample(f, editor.tmpFilenameU, UNICHAR_STRLEN(editor.tmpFilenameU));
 	fseek(f, 0, SEEK_END);
 	uint32_t filesize = ftell(f);
 
@@ -119,19 +132,12 @@ static int32_t SDLCALL loadSampleThread(void *ptr)
 	rewind(f);
 	switch (format)
 	{
-		case FORMAT_FLAC:
-		{
-#ifdef HAS_LIBFLAC
-			sampleLoaded = loadFLAC(f, filesize);
-#else
-			loaderMsgBox("Can't load sample: Program is not compiled with FLAC support!");
-#endif
-		}
-		break;
-
 		case FORMAT_IFF: sampleLoaded = loadIFF(f, filesize); break;
 		case FORMAT_WAV: sampleLoaded = loadWAV(f, filesize); break;
 		case FORMAT_AIFF: sampleLoaded = loadAIFF(f, filesize); break;
+		case FORMAT_FLAC: sampleLoaded = loadFLAC(f, filesize); break;
+		case FORMAT_OGG: sampleLoaded = loadOGG(f, filesize); break;
+		case FORMAT_MP3: sampleLoaded = loadMP3(f, filesize); break;
 		case FORMAT_BRR: sampleLoaded = loadBRR(f, filesize); break;
 		default: sampleLoaded = loadRAW(f, filesize); break;
 	}
@@ -253,7 +259,7 @@ bool loadSample(UNICHAR *filenameU, uint8_t smpNr, bool instrFlag)
 	UNICHAR_STRCPY(editor.tmpFilenameU, filenameU);
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(loadSampleThread, NULL, NULL);
+	thread = SDL_CreateThread(loadSampleThread, "sample load thread", NULL);
 	if (thread == NULL)
 	{
 		sampleIsLoading = false;

@@ -30,7 +30,6 @@
 #include "ft2_random.h"
 #include "ft2_replayer.h"
 #include "ft2_smpfx.h"
-#include "mixer/ft2_windowed_sinc.h" // SINC_TAPS, SINC_NEGATIVE_TAPS
 
 static const char sharpNote1Char[12] = { 'C', 'C', 'D', 'D', 'E', 'F', 'F', 'G', 'G', 'A', 'A', 'B' };
 static const char sharpNote2Char[12] = { '-', '#', '-', '#', '-', '-', '#', '-', '#', '-', '#', '-' };
@@ -202,8 +201,8 @@ void sanitizeSample(sample_t *s)
 		return;
 
 	// if a sample has both forward loop and pingpong loop set, it means pingpong loop (FT2 mixer behavior)
-	if (GET_LOOPTYPE(s->flags) == (LOOP_FWD | LOOP_BIDI))
-		s->flags &= ~LOOP_FWD; // remove forward loop flag
+	if (GET_LOOPTYPE(s->flags) == (LOOP_FORWARD | LOOP_PINGPONG))
+		s->flags &= ~LOOP_FORWARD; // remove forward loop flag
 
 	if (s->volume > 64)
 		s->volume = 64;
@@ -231,7 +230,7 @@ void fixSample(sample_t *s)
 	int32_t pos;
 	bool backwards;
 
-	assert(s != NULL);
+	ASSERT(s != NULL);
 	if (s->dataPtr == NULL || s->length <= 0)
 	{
 		s->isFixed = false;
@@ -271,7 +270,7 @@ void fixSample(sample_t *s)
 			s->dataPtr[i-MAX_LEFT_TAPS] = s->dataPtr[0];
 	}
 
-	if (loopType == LOOP_OFF) // no loop
+	if (loopType == LOOP_DISABLED) // no loop
 	{
 		if (sample16Bit)
 		{
@@ -292,7 +291,7 @@ void fixSample(sample_t *s)
 	s->fixedPos = loopEnd;
 	s->isFixed = true;
 
-	if (loopType == LOOP_FWD) // forward loop
+	if (loopType == LOOP_FORWARD) // forward loop
 	{
 		if (sample16Bit)
 		{
@@ -465,7 +464,7 @@ void fixSample(sample_t *s)
 // restores interpolation tap samples after loop/end
 void unfixSample(sample_t *s)
 {
-	assert(s != NULL);
+	ASSERT(s != NULL);
 	if (s->dataPtr == NULL || !s->isFixed)
 		return; // empty sample or not fixed (f.ex. no loop)
 
@@ -503,17 +502,16 @@ double getSampleValue(int8_t *smpData, int32_t position, bool sample16Bit)
 
 void putSampleValue(int8_t *smpData, int32_t position, double dSample, bool sample16Bit)
 {
-	DROUND(dSample);
-	int32_t sample = (int32_t)dSample;
+	int32_t sample = (int32_t)round(dSample);
 
 	if (sample16Bit)
 	{
-		CLAMP16(sample);
+		sample = CLAMP(sample, INT16_MIN, INT16_MAX);
 		*((int16_t *)&smpData[position<<1]) = (int16_t)sample;
 	}
 	else
 	{
-		CLAMP8(sample);
+		sample = CLAMP(sample, INT8_MIN, INT8_MAX);
 		smpData[position] = (int8_t)sample;
 	}
 }
@@ -529,11 +527,6 @@ void clearCopyBuffer(void)
 	smpCopySize = 0;
 	smpCopyBits = 8;
 	smpCopyDidCopyWholeSample = false;
-}
-
-int32_t getSampleMiddleCRate(sample_t *s)
-{
-	return (int32_t)(getSampleC4Rate(s) + 0.5); // rounded
 }
 
 int32_t getSampleRangeStart(void)
@@ -629,7 +622,7 @@ static void fixLoopGadgets(void)
 	sample_t *s = getCurSample();
 
 	bool showLoopPins = true;
-	if (s == NULL || s->dataPtr == NULL || s->length <= 0 || GET_LOOPTYPE(s->flags) == LOOP_OFF)
+	if (s == NULL || s->dataPtr == NULL || s->length <= 0 || GET_LOOPTYPE(s->flags) == LOOP_DISABLED)
 		showLoopPins = false;
 
 	// draw Repeat/Replen. numbers
@@ -675,13 +668,13 @@ static void fixSampleScrollbar(void)
 	{
 		setScrollBarPageLength(SB_SAMP_SCROLL, 0);
 		setScrollBarEnd(SB_SAMP_SCROLL, 0);
-		setScrollBarPos(SB_SAMP_SCROLL, 0, false);
+		setScrollBarPos(SB_SAMP_SCROLL, 0,  DONT_TRIGGER_CALLBACK);
 		return;
 	}
 
 	setScrollBarPageLength(SB_SAMP_SCROLL, smpEd_ViewSize);
 	setScrollBarEnd(SB_SAMP_SCROLL, instr[editor.curInstr]->smp[editor.curSmp].length);
-	setScrollBarPos(SB_SAMP_SCROLL, smpEd_ScrPos, false);
+	setScrollBarPos(SB_SAMP_SCROLL, smpEd_ScrPos, DONT_TRIGGER_CALLBACK);
 }
 
 static bool getCopyBuffer(int32_t size, bool sample16Bit)
@@ -703,7 +696,7 @@ static bool getCopyBuffer(int32_t size, bool sample16Bit)
 	return true;
 }
 
-static int32_t SDLCALL copySampleThread(void *ptr)
+static int32_t copySampleThread(void *ptr)
 {
 	pauseAudio();
 
@@ -742,7 +735,7 @@ void copySmp(void) // copy sample from srcInstr->srcSmp to curInstr->curSmp
 		return;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(copySampleThread, NULL, NULL);
+	thread = SDL_CreateThread(copySampleThread, "copy sample thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -794,7 +787,7 @@ static void writeRange(void)
 	end = CLAMP(end, 0, SAMPLE_AREA_WIDTH-1);
 
 	int32_t rangeLen = (end + 1) - start;
-	assert(start+rangeLen <= SCREEN_W);
+	ASSERT(start+rangeLen <= SCREEN_W);
 
 	uint32_t *ptr32 = &video.frameBuffer[(174 * SCREEN_W) + start];
 	for (int32_t y = 0; y < SAMPLE_AREA_HEIGHT; y++)
@@ -918,183 +911,40 @@ void sampleLine(int32_t x1, int32_t x2, int32_t y1, int32_t y2)
 	}
 }
 
+// these min/max routines hugely benefit from SIMD instruction usage (Visual Studio 2026 does this)
+
 static void getMinMax16(const void *p, uint32_t scanLen, int16_t *min16, int16_t *max16)
 {
-#if defined _WIN32 || defined __amd64__ || (defined __i386__ && defined __SSE2__)
-	if (cpu.hasSSE2)
+	int16_t minVal =  32767;
+	int16_t maxVal = -32768;
+
+	const int16_t *ptr16 = (const int16_t *)p;
+	for (uint32_t i = 0; i < scanLen; i++)
 	{
-		/* Taken with permission from the OpenMPT project (and slightly modified).
-		**
-		** SSE2 implementation for min/max finder, packs 8*int16 in a 128-bit XMM register.
-		** scanLen = How many samples to process
-		*/
-		const int16_t *p16;
-		uint32_t scanLen8;
-		const __m128i *v;
-		__m128i minVal, maxVal, minVal2, maxVal2, curVals;
-
-		// Put minimum / maximum in 8 packed int16 values
-		minVal = _mm_set1_epi16(32767);
-		maxVal = _mm_set1_epi16(-32768);
-
-		scanLen8 = scanLen / 8;
-		if (scanLen8 > 0)
-		{
-			v = (__m128i *)p;
-			p = (const __m128i *)p + scanLen8;
-
-			while (scanLen8--)
-			{
-				curVals = _mm_loadu_si128(v++);
-				minVal = _mm_min_epi16(minVal, curVals);
-				maxVal = _mm_max_epi16(maxVal, curVals);
-			}
-
-			/* Now we have 8 minima and maxima each.
-			** Move the upper 4 values to the lower half and compute the minima/maxima of that. */
-			minVal2 = _mm_unpackhi_epi64(minVal, minVal);
-			maxVal2 = _mm_unpackhi_epi64(maxVal, maxVal);
-			minVal = _mm_min_epi16(minVal, minVal2);
-			maxVal = _mm_max_epi16(maxVal, maxVal2);
-
-			/* Now we have 4 minima and maxima each.
-			** Move the upper 2 values to the lower half and compute the minima/maxima of that. */
-			minVal2 = _mm_shuffle_epi32(minVal, _MM_SHUFFLE(1, 1, 1, 1));
-			maxVal2 = _mm_shuffle_epi32(maxVal, _MM_SHUFFLE(1, 1, 1, 1));
-			minVal = _mm_min_epi16(minVal, minVal2);
-			maxVal = _mm_max_epi16(maxVal, maxVal2);
-
-			// Compute the minima/maxima of the both remaining values
-			minVal2 = _mm_shufflelo_epi16(minVal, _MM_SHUFFLE(1, 1, 1, 1));
-			maxVal2 = _mm_shufflelo_epi16(maxVal, _MM_SHUFFLE(1, 1, 1, 1));
-			minVal = _mm_min_epi16(minVal, minVal2);
-			maxVal = _mm_max_epi16(maxVal, maxVal2);
-		}
-
-		p16 = (const int16_t *)p;
-		while (scanLen-- & 7)
-		{
-			curVals = _mm_set1_epi16(*p16++);
-			minVal = _mm_min_epi16(minVal, curVals);
-			maxVal = _mm_max_epi16(maxVal, curVals);
-		}
-
-		*min16 = (int16_t)_mm_cvtsi128_si32(minVal);
-		*max16 = (int16_t)_mm_cvtsi128_si32(maxVal);
+		const int16_t smp16 = ptr16[i];
+		if (smp16 < minVal) minVal = smp16;
+		if (smp16 > maxVal) maxVal = smp16;
 	}
-	else
-#endif
-	{
-		// non-SSE version (really slow for big samples while zoomed out)
-		int16_t minVal =  32767;
-		int16_t maxVal = -32768;
 
-		const int16_t *ptr16 = (const int16_t *)p;
-		for (uint32_t i = 0; i < scanLen; i++)
-		{
-			const int16_t smp16 = ptr16[i];
-			if (smp16 < minVal) minVal = smp16;
-			if (smp16 > maxVal) maxVal = smp16;
-		}
-
-		*min16 = minVal;
-		*max16 = maxVal;
-	}
+	*min16 = minVal;
+	*max16 = maxVal;
 }
 
 static void getMinMax8(const void *p, uint32_t scanLen, int8_t *min8, int8_t *max8)
 {
-#if defined _WIN32 || defined __amd64__ || (defined __i386__ && defined __SSE2__)
-	if (cpu.hasSSE2)
+	int8_t minVal =  127;
+	int8_t maxVal = -128;
+
+	const int8_t *ptr8 = (const int8_t *)p;
+	for (uint32_t i = 0; i < scanLen; i++)
 	{
-		/* Taken with permission from the OpenMPT project (and slightly modified).
-		**
-		** SSE2 implementation for min/max finder, packs 16*int8 in a 128-bit XMM register.
-		** scanLen = How many samples to process
-		*/
-		const int8_t *p8;
-		uint32_t scanLen16;
-		const __m128i *v;
-		__m128i xorVal, minVal, maxVal, minVal2, maxVal2, curVals;
-
-		// Put minimum / maximum in 8 packed int16 values (-1 and 0 because unsigned)
-		minVal = _mm_set1_epi8(-1);
-		maxVal = _mm_set1_epi8(0);
-
-		// For signed <-> unsigned conversion (_mm_min_epi8/_mm_max_epi8 is SSE4)
-		xorVal = _mm_set1_epi8(0x80);
-
-		scanLen16 = scanLen / 16;
-		if (scanLen16 > 0)
-		{
-			v = (__m128i *)p;
-			p = (const __m128i *)p + scanLen16;
-
-			while (scanLen16--)
-			{
-				curVals = _mm_loadu_si128(v++);
-				curVals = _mm_xor_si128(curVals, xorVal);
-				minVal = _mm_min_epu8(minVal, curVals);
-				maxVal = _mm_max_epu8(maxVal, curVals);
-			}
-
-			/* Now we have 16 minima and maxima each.
-			** Move the upper 8 values to the lower half and compute the minima/maxima of that. */
-			minVal2 = _mm_unpackhi_epi64(minVal, minVal);
-			maxVal2 = _mm_unpackhi_epi64(maxVal, maxVal);
-			minVal = _mm_min_epu8(minVal, minVal2);
-			maxVal = _mm_max_epu8(maxVal, maxVal2);
-
-			/* Now we have 8 minima and maxima each.
-			** Move the upper 4 values to the lower half and compute the minima/maxima of that. */
-			minVal2 = _mm_shuffle_epi32(minVal, _MM_SHUFFLE(1, 1, 1, 1));
-			maxVal2 = _mm_shuffle_epi32(maxVal, _MM_SHUFFLE(1, 1, 1, 1));
-			minVal = _mm_min_epu8(minVal, minVal2);
-			maxVal = _mm_max_epu8(maxVal, maxVal2);
-
-			/* Now we have 4 minima and maxima each.
-			** Move the upper 2 values to the lower half and compute the minima/maxima of that. */
-			minVal2 = _mm_srai_epi32(minVal, 16);
-			maxVal2 = _mm_srai_epi32(maxVal, 16);
-			minVal = _mm_min_epu8(minVal, minVal2);
-			maxVal = _mm_max_epu8(maxVal, maxVal2);
-
-			// Compute the minima/maxima of the both remaining values
-			minVal2 = _mm_srai_epi16(minVal, 8);
-			maxVal2 = _mm_srai_epi16(maxVal, 8);
-			minVal = _mm_min_epu8(minVal, minVal2);
-			maxVal = _mm_max_epu8(maxVal, maxVal2);
-		}
-
-		p8 = (const int8_t *)p;
-		while (scanLen-- & 15)
-		{
-			curVals = _mm_set1_epi8(*p8++ ^ 0x80);
-			minVal = _mm_min_epu8(minVal, curVals);
-			maxVal = _mm_max_epu8(maxVal, curVals);
-		}
-
-		*min8 = (int8_t)(_mm_cvtsi128_si32(minVal) ^ 0x80);
-		*max8 = (int8_t)(_mm_cvtsi128_si32(maxVal) ^ 0x80);
+		const int8_t smp8 = ptr8[i];
+		if (smp8 < minVal) minVal = smp8;
+		if (smp8 > maxVal) maxVal = smp8;
 	}
-	else
-#endif
-	{
-		// non-SSE version (really slow for big samples while zoomed out)
-		int8_t minVal =  127;
-		int8_t maxVal = -128;
 
-		const int8_t *ptr8 = (const int8_t *)p;
-		for (uint32_t i = 0; i < scanLen; i++)
-		{
-			const int8_t smp8 = ptr8[i];
-			if (smp8 < minVal) minVal = smp8;
-			if (smp8 > maxVal) maxVal = smp8;
-		}
-
-		*min8 = minVal;
-		*max8 = maxVal;
-	}
+	*min8 = minVal;
+	*max8 = maxVal;
 }
 
 // for scanning sample data peak where loopEnd+MAX_RIGHT_TAPS is within scan range (fixed interpolation tap samples)
@@ -1450,7 +1300,7 @@ void updateSampleEditorSample(void)
 
 	updateViewSize();
 
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
 }
 
 void updateSampleEditor(void)
@@ -1485,9 +1335,9 @@ void updateSampleEditor(void)
 	uncheckRadioButtonGroup(RB_GROUP_SAMPLE_LOOP);
 
 	uint8_t loopType = GET_LOOPTYPE(flags);
-	if (loopType == LOOP_OFF)
+	if (loopType == LOOP_DISABLED)
 		radioButtons[RB_SAMPLE_NO_LOOP].state = RADIOBUTTON_CHECKED;
-	else if (loopType == LOOP_FWD)
+	else if (loopType == LOOP_FORWARD)
 		radioButtons[RB_SAMPLE_FORWARD_LOOP].state = RADIOBUTTON_CHECKED;
 	else
 		radioButtons[RB_SAMPLE_PINGPONG_LOOP].state = RADIOBUTTON_CHECKED;
@@ -1981,7 +1831,7 @@ static bool cutRange(bool cropMode, int32_t r1, int32_t r2)
 	return true;
 }
 
-static int32_t SDLCALL sampCutThread(void *ptr)
+static int32_t sampCutThread(void *ptr)
 {
 	if (!cutRange(false, smpEd_Rx1, smpEd_Rx2))
 		okBoxThreadSafe(0, "System message", "Not enough memory! (Disable \"cut to buffer\")", NULL);
@@ -2000,7 +1850,7 @@ void sampCut(void)
 		return;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(sampCutThread, NULL, NULL);
+	thread = SDL_CreateThread(sampCutThread, "sample cut thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -2010,7 +1860,7 @@ void sampCut(void)
 	SDL_DetachThread(thread);
 }
 
-static int32_t SDLCALL sampCopyThread(void *ptr)
+static int32_t sampCopyThread(void *ptr)
 {
 	sample_t *s = getCurSample();
 
@@ -2048,7 +1898,7 @@ void sampCopy(void)
 		return;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(sampCopyThread, NULL, NULL);
+	thread = SDL_CreateThread(sampCopyThread, "sample copy thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -2144,7 +1994,7 @@ static void pasteCopiedData(int8_t *dataPtr, int32_t offset, int32_t length, boo
 	}
 }
 
-static int32_t SDLCALL sampPasteThread(void *ptr)
+static int32_t sampPasteThread(void *ptr)
 {
 	smpPtr_t sp;
 
@@ -2259,7 +2109,7 @@ void sampPaste(void)
 	}
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(sampPasteThread, NULL, NULL);
+	thread = SDL_CreateThread(sampPasteThread, "sample paste thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -2269,7 +2119,7 @@ void sampPaste(void)
 	SDL_DetachThread(thread);
 }
 
-static int32_t SDLCALL sampCropThread(void *ptr)
+static int32_t sampCropThread(void *ptr)
 {
 	sample_t *s = getCurSample();
 
@@ -2314,7 +2164,7 @@ void sampCrop(void)
 		return; // nothing to crop (the whole sample is marked)
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(sampCropThread, NULL, NULL);
+	thread = SDL_CreateThread(sampCropThread, "sample crop thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -2333,7 +2183,7 @@ void sampXFade(void)
 		return;
 
 	// check if the sample has the loop flag enabled
-	if (GET_LOOPTYPE(s->flags) == LOOP_OFF)
+	if (GET_LOOPTYPE(s->flags) == LOOP_DISABLED)
 	{
 		okBox(0, "System message", "X-Fade can only be used on a loop-enabled sample!", NULL);
 		return;
@@ -2358,7 +2208,7 @@ void sampXFade(void)
 
 	bool sample16Bit = !!(s->flags & SAMPLE_16BIT);
 
-	if (GET_LOOPTYPE(s->flags) == LOOP_BIDI)
+	if (GET_LOOPTYPE(s->flags) == LOOP_PINGPONG)
 	{
 		y1 = s->loopStart;
 		if (x1 <= y1) // first loop point
@@ -2569,7 +2419,7 @@ void sampXFade(void)
 		resumeAudio();
 	}
 
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
 	setSongModifiedFlag();
 }
 
@@ -2588,7 +2438,7 @@ void rbSampleNoLoop(void)
 	unlockMixerCallback();
 
 	updateSampleEditor();
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
 	setSongModifiedFlag();
 }
 
@@ -2602,7 +2452,7 @@ void rbSampleForwardLoop(void)
 	unfixSample(s);
 
 	DISABLE_LOOP(s->flags);
-	s->flags |= LOOP_FWD;
+	s->flags |= LOOP_FORWARD;
 
 	if (s->loopStart+s->loopLength == 0)
 	{
@@ -2614,7 +2464,7 @@ void rbSampleForwardLoop(void)
 	unlockMixerCallback();
 
 	updateSampleEditor();
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
 	setSongModifiedFlag();
 }
 
@@ -2628,7 +2478,7 @@ void rbSamplePingpongLoop(void)
 	unfixSample(s);
 
 	DISABLE_LOOP(s->flags);
-	s->flags |= LOOP_BIDI;
+	s->flags |= LOOP_PINGPONG;
 
 	if (s->loopStart+s->loopLength == 0)
 	{
@@ -2640,14 +2490,14 @@ void rbSamplePingpongLoop(void)
 	unlockMixerCallback();
 
 	updateSampleEditor();
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
 	setSongModifiedFlag();
 }
 
-static int32_t SDLCALL convSmp8Bit(void *ptr)
+static int32_t convSmp8Bit(void *ptr)
 {
 	sample_t *s = getCurSample();
-	assert(s->dataPtr != NULL);
+	ASSERT(s->dataPtr != NULL);
 
 	pauseAudio();
 	unfixSample(s);
@@ -2681,7 +2531,7 @@ void rbSample8bit(void)
 	if (okBox(2, "System request", "Pre-convert sample data?", NULL) == 1)
 	{
 		mouseAnimOn();
-		thread = SDL_CreateThread(convSmp8Bit, NULL, NULL);
+		thread = SDL_CreateThread(convSmp8Bit, "sample convert thread", NULL);
 		if (thread == NULL)
 		{
 			okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -2709,7 +2559,7 @@ void rbSample8bit(void)
 	}
 }
 
-static int32_t SDLCALL convSmp16Bit(void *ptr)
+static int32_t convSmp16Bit(void *ptr)
 {
 	sample_t *s = getCurSample();
 
@@ -2749,7 +2599,7 @@ void rbSample16bit(void)
 	if (okBox(2, "System request", "Pre-convert sample data?", NULL) == 1)
 	{
 		mouseAnimOn();
-		thread = SDL_CreateThread(convSmp16Bit, NULL, NULL);
+		thread = SDL_CreateThread(convSmp16Bit, "sample convert thread", NULL);
 		if (thread == NULL)
 		{
 			okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -2797,7 +2647,7 @@ void sampMinimize(void)
 	if (s == NULL || s->dataPtr == NULL || s->length <= 0)
 		return;
 
-	const bool hasLoop = GET_LOOPTYPE(s->flags) != LOOP_OFF;
+	const bool hasLoop = GET_LOOPTYPE(s->flags) != LOOP_DISABLED;
 	if (!hasLoop)
 	{
 		okBox(0, "System message", "Only a looped sample can be minimized!", NULL);
@@ -3020,7 +2870,7 @@ void showSampleEditor(void)
 	hLine(0, 328, SAMPLE_AREA_WIDTH, PAL_BCKGRND);
 
 	updateSampleEditor();
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
 
 	if (ui.sampleEditorEffectsShown)
 		pbEffects();
@@ -3055,7 +2905,7 @@ static void writeSamplePosLine(void)
 {
 	uint8_t ins, smp;
 
-	assert(editor.curSmpChannel < MAX_CHANNELS);
+	ASSERT(editor.curSmpChannel < MAX_CHANNELS);
 	lastChInstr_t *c = &lastChInstr[editor.curSmpChannel];
 
 	if (c->instrNum == 130) // "Play Wave/Range/Display" in Smp. Ed.
@@ -3106,11 +2956,11 @@ void handleSamplerRedrawing(void)
 	if (writeSampleFlag)
 	{
 		writeSampleFlag = false;
-		writeSample(true);
+		writeSample(FORCE_SAMPLE_REDRAW);
 	}
 	else if (smpEd_Rx1 != old_Rx1 || smpEd_Rx2 != old_Rx2 || smpEd_ScrPos != old_SmpScrPos || smpEd_ViewSize != old_ViewSize)
 	{
-		writeSample(false);
+		writeSample(DONT_FORCE_SAMPLE_REDRAW);
 	}
 
 	writeSamplePosLine();
@@ -3328,7 +3178,7 @@ static void editSampleData(bool mouseButtonHeld)
 	lastDrawY = rvl;
 	lastDrawX = r;
 
-	writeSample(true);
+	writeSample(FORCE_SAMPLE_REDRAW);
 }
 
 void handleSampleDataMouseDown(bool mouseButtonHeld)
@@ -3493,7 +3343,7 @@ void drawSampleEditorExt(void)
 void showSampleEditorExt(void)
 {
 	hideTopScreen();
-	showTopScreen(false);
+	showTopScreen(DONT_RESTORE_SCREENS);
 
 	if (ui.extendedPatternEditor)
 		exitPatternEditorExtended();
@@ -3535,7 +3385,7 @@ void toggleSampleEditorExt(void)
 		showSampleEditorExt();
 }
 
-static int32_t SDLCALL sampleBackwardsThread(void *ptr)
+static int32_t sampleBackwardsThread(void *ptr)
 {
 	int8_t tmp8, *ptrStart, *ptrEnd;
 	int16_t tmp16, *ptrStart16, *ptrEnd16;
@@ -3613,7 +3463,7 @@ void sampleBackwards(void)
 		return;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(sampleBackwardsThread, NULL, NULL);
+	thread = SDL_CreateThread(sampleBackwardsThread, "sample modification thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -3623,7 +3473,7 @@ void sampleBackwards(void)
 	SDL_DetachThread(thread);
 }
 
-static int32_t SDLCALL sampleChangeSignThread(void *ptr)
+static int32_t sampleChangeSignThread(void *ptr)
 {
 	sample_t *s = getCurSample();
 
@@ -3662,7 +3512,7 @@ void sampleChangeSign(void)
 		return;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(sampleChangeSignThread, NULL, NULL);
+	thread = SDL_CreateThread(sampleChangeSignThread, "sample modification thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -3672,7 +3522,7 @@ void sampleChangeSign(void)
 	SDL_DetachThread(thread);
 }
 
-static int32_t SDLCALL sampleByteSwapThread(void *ptr)
+static int32_t sampleByteSwapThread(void *ptr)
 {
 	sample_t *s = getCurSample();
 
@@ -3716,7 +3566,7 @@ void sampleByteSwap(void)
 	}
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(sampleByteSwapThread, NULL, NULL);
+	thread = SDL_CreateThread(sampleByteSwapThread, "sample modification thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -3726,7 +3576,7 @@ void sampleByteSwap(void)
 	SDL_DetachThread(thread);
 }
 
-static int32_t SDLCALL fixDCThread(void *ptr)
+static int32_t fixDCThread(void *ptr)
 {
 	int8_t *ptr8;
 	int16_t *ptr16;
@@ -3757,7 +3607,7 @@ static int32_t SDLCALL fixDCThread(void *ptr)
 		pauseAudio();
 		unfixSample(s);
 
-		int64_t	averageDC = 0;
+		int64_t averageDC = 0;
 		for (int32_t i = 0; i < length; i++)
 			averageDC += ptr16[i];
 		averageDC = (averageDC + (length>>1)) / length; // rounded
@@ -3766,8 +3616,7 @@ static int32_t SDLCALL fixDCThread(void *ptr)
 		for (int32_t i = 0; i < length; i++)
 		{
 			int32_t smp32 = ptr16[i] - smpSub;
-			CLAMP16(smp32);
-			ptr16[i] = (int16_t)smp32;
+			ptr16[i] = (int16_t)(CLAMP(smp32, INT16_MIN, INT16_MAX));
 		}
 
 		fixSample(s);
@@ -3795,7 +3644,7 @@ static int32_t SDLCALL fixDCThread(void *ptr)
 		pauseAudio();
 		unfixSample(s);
 
-		int64_t	averageDC = 0;
+		int64_t averageDC = 0;
 		for (int32_t i = 0; i < length; i++)
 			averageDC += ptr8[i];
 		averageDC = (averageDC + (length>>1)) / length; // rounded
@@ -3804,8 +3653,7 @@ static int32_t SDLCALL fixDCThread(void *ptr)
 		for (int32_t i = 0; i < length; i++)
 		{
 			int32_t smp32 = ptr8[i] - smpSub;
-			CLAMP8(smp32);
-			ptr8[i] = (int8_t)smp32;
+			ptr8[i] = (int8_t)(CLAMP(smp32, INT8_MIN, INT8_MAX));
 		}
 
 		fixSample(s);
@@ -3828,7 +3676,7 @@ void fixDC(void)
 		return;
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(fixDCThread, NULL, NULL);
+	thread = SDL_CreateThread(fixDCThread, "sample modification thread", NULL);
 	if (thread == NULL)
 	{
 		okBox(0, "System message", "Couldn't create thread!", NULL);
@@ -3865,7 +3713,7 @@ void testSmpEdMouseUp(void) // used for setting new loop points
 			unlockMixerCallback();
 
 			setSongModifiedFlag();
-			writeSample(true);
+			writeSample(FORCE_SAMPLE_REDRAW);
 		}
 	}
 }

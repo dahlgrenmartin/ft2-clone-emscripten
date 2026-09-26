@@ -1,9 +1,6 @@
 #pragma once
 
 #include "../ft2_audio.h"
-#include "ft2_quadratic_spline.h"
-#include "ft2_cubic_spline.h"
-#include "ft2_windowed_sinc.h"
 
 /* ----------------------------------------------------------------------- */
 /*                          GENERAL MIXER MACROS                           */
@@ -53,11 +50,11 @@
 	base = v->base16; \
 	smpPtr = base + position;
 
-#define SET_BASE8_BIDI \
+#define SET_BASE8_PINGPONG \
 	base = v->base8; \
 	revBase = v->revBase8;
 
-#define SET_BASE16_BIDI \
+#define SET_BASE16_PINGPONG \
 	base = v->base16; \
 	revBase = v->revBase16;
 
@@ -66,7 +63,7 @@
 	smpPtr += positionFrac >> MIXER_FRAC_BITS; \
 	positionFrac &= MIXER_FRAC_MASK;
 
-#define INC_POS_BIDI \
+#define INC_POS_PINGPONG \
 	positionFrac += deltaLo; \
 	smpPtr += positionFrac >> MIXER_FRAC_BITS; \
 	smpPtr += deltaHi; \
@@ -88,7 +85,7 @@
 */
 
 /* ----------------------------------------------------------------------- */
-/*                  NO INTERPOLATION (NEAREST NEIGHBOR)                    */
+/*                            NO INTERPOLATION                             */
 /* ----------------------------------------------------------------------- */
 
 #define RENDER_8BIT_SMP \
@@ -106,45 +103,25 @@
 /*                          LINEAR INTERPOLATION                           */
 /* ----------------------------------------------------------------------- */
 
-#define LINEAR_INTERPOLATION(s, f, scale) \
+#define LINEAR_INTERPOLATION8(s, f) \
 { \
-	const int32_t frac = (uint32_t)(f) >> 1; /* uint32 -> int32 range, faster int->float conv. (x86/x86_64) */ \
-	const float fFrac = (int32_t)frac * (1.0f / (MIXER_FRAC_SCALE/2)); /* 0.0f .. 0.9999999f */ \
-	fSample = (s[0] + ((s[1] - s[0]) * fFrac)) * (1.0f / scale); \
+	const int16_t frac = (int16_t)((uint32_t)(f) >> (MIXER_FRAC_BITS-15)); /* 0..32767 */ \
+	fSample = ((s[0] << 8) + ((((s[1] - s[0]) << 8) * frac) >> 15)) * (1.0f / 32768.0f); \
+}
+
+#define LINEAR_INTERPOLATION16(s, f) \
+{ \
+	const int16_t frac = (int16_t)((uint32_t)(f) >> (MIXER_FRAC_BITS-15)); /* 0..32767 */ \
+	fSample = (s[0] + (((s[1] - s[0]) * frac) >> 15)) * (1.0f / 32768.0f); \
 }
 
 #define RENDER_8BIT_SMP_LINTRP \
-	LINEAR_INTERPOLATION(smpPtr, positionFrac, 128) \
+	LINEAR_INTERPOLATION8(smpPtr, positionFrac) \
 	*fMixBufferL++ += fSample * fVolumeL; \
 	*fMixBufferR++ += fSample * fVolumeR;
 
 #define RENDER_16BIT_SMP_LINTRP \
-	LINEAR_INTERPOLATION(smpPtr, positionFrac, 32768) \
-	*fMixBufferL++ += fSample * fVolumeL; \
-	*fMixBufferR++ += fSample * fVolumeR;
-
-
-/* ----------------------------------------------------------------------- */
-/*                     QUADRATIC SPLINE INTERPOLATION                      */
-/* ----------------------------------------------------------------------- */
-
-// through LUT: mixer/ft2_quadratic_spline.c
-
-#define QUADRATIC_SPLINE_INTERPOLATION(s, f, scale) \
-{ \
-	const float *t = fQuadraticSplineLUT + (((uint32_t)(f) >> QUADRATIC_SPLINE_FRACSHIFT) * QUADRATIC_SPLINE_WIDTH); \
-	fSample = ((s[0] * t[0]) + \
-	           (s[1] * t[1]) + \
-	           (s[2] * t[2])) * (1.0f / scale); \
-}
-
-#define RENDER_8BIT_SMP_QINTRP \
-	QUADRATIC_SPLINE_INTERPOLATION(smpPtr, positionFrac, 128) \
-	*fMixBufferL++ += fSample * fVolumeL; \
-	*fMixBufferR++ += fSample * fVolumeR;
-
-#define RENDER_16BIT_SMP_QINTRP \
-	QUADRATIC_SPLINE_INTERPOLATION(smpPtr, positionFrac, 32768) \
+	LINEAR_INTERPOLATION16(smpPtr, positionFrac) \
 	*fMixBufferL++ += fSample * fVolumeL; \
 	*fMixBufferR++ += fSample * fVolumeR;
 
@@ -153,15 +130,23 @@
 /*                       CUBIC SPLINE INTERPOLATION                        */
 /* ----------------------------------------------------------------------- */
 
-// through LUT: mixer/ft2_cubic_spline.c
-
+// Catmull-Rom algorithm (with unity gain)
 #define CUBIC_SPLINE_INTERPOLATION(s, f, scale) \
 { \
-	const float *t = fCubicSplineLUT + (((uint32_t)(f) >> CUBIC_SPLINE_FRACSHIFT) & CUBIC_SPLINE_FRACMASK); \
-	fSample = ((s[-1] * t[0]) + \
-	           ( s[0] * t[1]) + \
-	           ( s[1] * t[2]) + \
-	           ( s[2] * t[3])) * (1.0f / scale); \
+	const int32_t frac31 = (uint32_t)f >> 1; /* reduce from uint32_t to int32_t for fast SIMD usage */ \
+	const float x = (float)frac31 * (1.0f / ((float)INT32_MAX+1.0f)); \
+	\
+	const float s1 = s[-1]; \
+	const float s2 = s[0]; \
+	const float s3 = s[1]; \
+	const float s4 = s[2]; \
+	\
+	const float c1 = s2; \
+	const float c2 = 0.5f * (s3 - s1); \
+	const float c3 = s1 - (2.5f * s2) + (2.0f * s3) - (0.5f * s4); \
+	const float c4 = 0.5f * (s4 - s1) + 1.5f * (s2 - s3); \
+	\
+	fSample = (((c4 * x + c3) * x + c2) * x + c1) * (1.0f / scale); \
 }
 
 #define RENDER_8BIT_SMP_CINTRP \
@@ -196,40 +181,56 @@
 /*                       WINDOWED-SINC INTERPOLATION                       */
 /* ----------------------------------------------------------------------- */
 
-// through LUTs: mixer/ft2_windowed_sinc.c
-
 #define WINDOWED_SINC8_INTERPOLATION(s, f, scale) \
 { \
-	const float *t = v->fSincLUT + (((uint32_t)(f) >> SINC1_FRACSHIFT) & SINC1_FRACMASK); \
-	fSample = ((s[-3] * t[0]) + \
-	           (s[-2] * t[1]) + \
-	           (s[-1] * t[2]) + \
-	           ( s[0] * t[3]) + \
-	           ( s[1] * t[4]) + \
-	           ( s[2] * t[5]) + \
-	           ( s[3] * t[6]) + \
-	           ( s[4] * t[7])) * (1.0f / scale); \
+	const uint32_t frac32 = (uint32_t)f; \
+	const uint32_t lutPhase = frac32 >> INTRP_PHASE_SHIFT; \
+	const float fIntrpFrac = (int32_t)(frac32 & INTRP_PHASE_MASK) * (1.0f / INTRP_PHASE_SCALE); \
+	\
+	/* it may look like we go out of bounds for fSinc_2, but we have an extra phase after LUT */ \
+	const float *fSinc_1 = v->fSincLUT + ( lutPhase    << SINC8_TAPS_BITS); \
+	const float *fSinc_2 = v->fSincLUT + ((lutPhase+1) << SINC8_TAPS_BITS); \
+	\
+	float fSum = 0.0f; \
+	\
+	/* I hope your compiler vectorizes this well ;) */ \
+	for (int32_t j = 0; j < SINC8_TAPS; j++) \
+	{ \
+		/* do linear interpolation between phases */ \
+		const float y1 = fSinc_1[j]; \
+		const float y2 = fSinc_2[j]; \
+		\
+		/* out of bounds for s[] is safe here and returns the correct samples */ \
+		fSum += s[j-((SINC8_TAPS/2)-1)] * (y1 + ((y2 - y1) * fIntrpFrac)); \
+	} \
+	\
+	fSample = fSum * (1.0f / scale); \
 }
 
 #define WINDOWED_SINC16_INTERPOLATION(s, f, scale) \
 { \
-	const float *t = v->fSincLUT + (((uint32_t)(f) >> SINC2_FRACSHIFT) & SINC2_FRACMASK); \
-	fSample = (( s[-7] * t[0]) + \
-	           ( s[-6] * t[1]) + \
-	           ( s[-5] * t[2]) + \
-	           ( s[-4] * t[3]) + \
-	           ( s[-3] * t[4]) + \
-	           ( s[-2] * t[5]) + \
-	           ( s[-1] * t[6]) + \
-	           (  s[0] * t[7]) + \
-	           (  s[1] * t[8]) + \
-	           (  s[2] * t[9]) + \
-	           (  s[3] * t[10]) + \
-	           (  s[4] * t[11]) + \
-	           (  s[5] * t[12]) + \
-	           (  s[6] * t[13]) + \
-	           (  s[7] * t[14]) + \
-	           (  s[8] * t[15])) * (1.0f / scale); \
+	const uint32_t frac32 = (uint32_t)f; \
+	const uint32_t lutPhase = frac32 >> INTRP_PHASE_SHIFT; \
+	const float fIntrpFrac = (int32_t)(frac32 & INTRP_PHASE_MASK) * (1.0f / INTRP_PHASE_SCALE); \
+	\
+	/* it may look like we go out of bounds for fSinc_2, but we have an extra phase after LUT */ \
+	const float *fSinc_1 = v->fSincLUT + ( lutPhase    << SINC16_TAPS_BITS); \
+	const float *fSinc_2 = v->fSincLUT + ((lutPhase+1) << SINC16_TAPS_BITS); \
+	\
+	float fSum = 0.0f; \
+	\
+	/* I hope your compiler vectorizes this well ;) */ \
+	for (int32_t j = 0; j < SINC16_TAPS; j++) \
+	{ \
+		/* do linear interpolation between phases */ \
+		const float y1 = fSinc_1[j]; \
+		const float y2 = fSinc_2[j]; \
+		\
+		/* out of bounds for s[] is safe here and returns the correct samples */ \
+		fSum += s[j-((SINC16_TAPS/2)-1)] * (y1 + ((y2 - y1) * fIntrpFrac)); \
+	} \
+	\
+	fSample = fSum * (1.0f / scale); \
 }
 
 #define RENDER_8BIT_SMP_S8INTRP \
@@ -297,7 +298,7 @@
 	if (samplesToMix > samplesLeft) \
 		samplesToMix = samplesLeft;
 
-#define START_BIDI \
+#define START_PINGPONG \
 	if (v->samplingBackwards) \
 	{ \
 		tmpDelta = 0 - delta; \
@@ -317,9 +318,7 @@
 #define LIMIT_MIX_NUM_RAMP \
 	if (v->volumeRampLength == 0) \
 	{ \
-		fVolumeLDelta = 0.0f; \
-		fVolumeRDelta = 0.0f; \
-		\
+		fVolumeLDelta = fVolumeRDelta = 0.0f; \
 		if (v->isFadeOutVoice) \
 		{ \
 			v->active = false; /* volume ramp fadeout-voice is done, shut it down */ \
@@ -357,7 +356,7 @@
 		v->hasLooped = true; \
 	}
 
-#define WRAP_BIDI_LOOP \
+#define WRAP_PINGPONG_LOOP \
 	if (position >= v->sampleEnd) \
 	{ \
 		do \
@@ -369,7 +368,7 @@
 		v->hasLooped = true; \
 	}
 
-#define END_BIDI \
+#define END_PINGPONG \
 	if (v->samplingBackwards) \
 	{ \
 		positionFrac ^= MIXER_FRAC_MASK; \

@@ -27,10 +27,11 @@
 #include "ft2_sample_loader.h"
 #include "ft2_tables.h"
 #include "ft2_structs.h"
-#include "mixer/ft2_cubic_spline.h"
 #include "mixer/ft2_windowed_sinc.h"
 
-static double dLogTab[4*12*16], dExp2MulTab[32];
+static uint32_t logTab[4*12*16], frequencyMulFactor, frequencyDivFactor;
+static uint64_t songTickDuration52fp[(MAX_BPM-MIN_BPM)+1];
+static double dDeltaMul, dScopeDeltaMul, dScopeDrawDeltaMul;
 static bool bxxOverflow;
 static note_t nilPatternLine[MAX_CHANNELS];
 
@@ -46,7 +47,7 @@ const uint16_t *note2PeriodLUT = NULL;
 int16_t patternNumRows[MAX_PATTERNS];
 channel_t channel[MAX_CHANNELS];
 song_t song;
-instr_t *instr[128+4];
+instr_t *instr[128+4]; // (extra placeholder instruments needed)
 note_t *pattern[MAX_PATTERNS];
 // ----------------------------------
 
@@ -99,7 +100,7 @@ void resetReplayerState(void)
 
 		ch = channel;
 		for (int32_t i = 0; i < song.numChannels; i++, ch++)
-			ch->status |= IS_Vol;
+			ch->status |= CS_UPDATE_VOL;
 	}
 }
 
@@ -115,7 +116,7 @@ void resetChannels(void)
 	for (int32_t i = 0; i < MAX_CHANNELS; i++, ch++)
 	{
 		ch->instrPtr = instr[0];
-		ch->status = IS_Vol;
+		ch->status = CS_UPDATE_VOL;
 		ch->oldPan = 128;
 		ch->outPan = 128;
 		ch->finalPan = 128;
@@ -144,24 +145,27 @@ void setSampleC4Hz(sample_t *s, double dC4Hz)
 	/* Sets a sample's relative note and finetune according to input C-4 rate.
 	**
 	** Note:
-	** This algorithm uses only 5 finetune bits (like FT2 internally),
+	** This algorithm uses only 5 finetune bits (like FT2's replayer)
 	** so that the resulting finetune is the same when loading it in a
-	** tracker that does support the full 8 finetune bits.
+	** tracker that *does* support the full 8 finetune bits.
 	*/
 
+	if (dC4Hz <= 0.0)
+		dC4Hz = 44100.0;
+
 	const double dC4PeriodOffset = (NOTE_C4 * 16) + 16;
-	int32_t period = (int32_t)round(dC4PeriodOffset + (log2(dC4Hz / C4_FREQ) * 12.0 * 16.0));
+	int32_t note = (int32_t)round(dC4PeriodOffset + (log2(dC4Hz / C4_FREQ) * (12.0 * 16.0)));
 
 	// Hi-limit is A#9 at highest finetune. B-9 is bugged in FT2, don't include it.
-	period = CLAMP(period, 0, (12 * 16 * 10) - 1);
+	note = CLAMP(note, 0, (10 * 12 * 16) - 1);
 
-	s->finetune = ((period & 31) - 16) << 3; // 0..31 -> -128..120
-	s->relativeNote = (int8_t)(((period & ~31) >> 4) - NOTE_C4);
+	s->finetune = ((note & 31) - 16) << 3; // 0..31 -> -128..120 (scale back to 8 bits)
+	s->relativeNote = (int8_t)(((note & ~31) >> 4) - NOTE_C4);
 }
 
 void setPatternLen(uint16_t pattNum, int16_t numRows)
 {
-	assert(pattNum < MAX_PATTERNS);
+	ASSERT(pattNum < MAX_PATTERNS);
 	if ((numRows < 1 || numRows > MAX_PATT_LEN) || numRows == patternNumRows[pattNum])
 		return;
 
@@ -232,50 +236,80 @@ int16_t getRealUsedSamples(int16_t smpNum)
 	return i+1;
 }
 
-double dLinearPeriod2Hz(int32_t period)
+static int32_t period2Ft2Delta(uint32_t period) // returns a 16.16fp value at 44000Hz (max FT2 mix rate for SB16)
 {
+	uint32_t ft2Delta;
+
 	period &= 0xFFFF; // just in case (actual period range is 0..65535)
 
 	if (period == 0)
-		return 0.0; // in FT2, a period of 0 results in 0Hz
+		return 0; // in FT2, a period of 0 results in 0Hz
 
-	const uint32_t invPeriod = ((12 * 192 * 4) - period) & 0xFFFF; // mask needed for FT2 period overflow quirk
+	if (audio.linearPeriodsFlag)
+	{
+		const uint32_t invPeriod = ((12 * 192 * 4) - period) & 0xFFFF; // mask needed for FT2 period overflow quirk
 
-	const uint32_t quotient  = invPeriod / (12 * 16 * 4);
-	const uint32_t remainder = invPeriod % (12 * 16 * 4);
+		const uint32_t quotient  = invPeriod / (12 * 16 * 4);
+		const uint32_t remainder = invPeriod % (12 * 16 * 4);
+		const uint8_t shiftValue = (14 - quotient) & 31;
 
-	return dLogTab[remainder] * dExp2MulTab[(14-quotient) & 31]; // x = y >> ((14-quotient) & 31);
+		ft2Delta = (uint32_t)(((uint64_t)logTab[remainder] * (uint32_t)frequencyMulFactor) >> 24);
+		ft2Delta >>= shiftValue;
+	}
+	else
+	{
+		ft2Delta = frequencyDivFactor / period;
+	}
+
+	return (int32_t)ft2Delta;
 }
 
-double dAmigaPeriod2Hz(int32_t period)
+int64_t period2VoiceDelta(uint32_t period)
 {
-	period &= 0xFFFF; // just in case (actual period range is 0..65535)
-
-	if (period == 0)
-		return 0.0; // in FT2, a period of 0 results in 0Hz
-
-	return (8363.0 * 1712.0) / period;
+	const int32_t ft2Delta = period2Ft2Delta(period);
+	return (int64_t)((ft2Delta * dDeltaMul) + 0.5);
 }
 
-double dPeriod2Hz(int32_t period)
+int64_t period2ScopeDelta(uint32_t period)
 {
-	return audio.linearPeriodsFlag ? dLinearPeriod2Hz(period) : dAmigaPeriod2Hz(period);
+	const int32_t ft2Delta = period2Ft2Delta(period);
+	return (int64_t)((ft2Delta * dScopeDeltaMul) + 0.5);
 }
 
-// returns *exact* FT2 C-4 voice rate (depending on finetune, relativeNote and linear/Amiga period mode)
-double getSampleC4Rate(sample_t *s)
+int32_t period2ScopeDrawDelta(uint32_t period)
+{
+	const int32_t ft2Delta = period2Ft2Delta(period);
+	return (int32_t)((ft2Delta * dScopeDrawDeltaMul) + 0.5);
+}
+
+// returns nominal FT2 C-4 voice rate (depending on finetune, relativeNote and linear/Amiga period mode)
+int32_t getSampleC4Hz(sample_t *s)
 {
 	int32_t note = NOTE_C4 + s->relativeNote;
-	if (note < 0)
-		return -1; // shouldn't happen (just in case...)
-
-	if (note >= (10*12)-1)
-		return -1; // B-9 (after relativeNote calculation) = illegal! (won't play in replayer)
+	if (note < 0 || note >= (10*12)-1) // also returns 0 for B-9 (note is bugged in FT2)
+		return 0;
 
 	const int32_t C4Period = (note << 4) + (((int8_t)s->finetune >> 3) + 16);
 
-	const int32_t period = audio.linearPeriodsFlag ? linearPeriodLUT[C4Period] : amigaPeriodLUT[C4Period];
-	return dPeriod2Hz(period);
+	const uint32_t period = audio.linearPeriodsFlag ? linearPeriodLUT[C4Period] : amigaPeriodLUT[C4Period];
+	if (period == 0)
+		return 0;
+
+	int32_t hz;
+	if (audio.linearPeriodsFlag)
+	{
+		const int32_t invPeriod = (6 * 12 * 16 * 4) - (int32_t)period;
+		hz = (int32_t)round(8363.0 * exp2(invPeriod / (12.0 * 16.0 * 4.0)));
+	}
+	else
+	{
+		hz = (int32_t)round((8363.0 * 1712.0) / period);
+	}
+
+	if (hz < 0)
+		hz = 0;
+
+	return hz;
 }
 
 void setLinearPeriods(bool linearPeriodsFlag)
@@ -297,9 +331,9 @@ void setLinearPeriods(bool linearPeriodsFlag)
 		setConfigAudioRadioButtonStates();
 	}
 
-	// update mid-C freq. in instr. editor (it can slightly differ between Amiga/linear)
+	// update mid-C freq. in instr. editor (it can differ between Amiga/linear)
 	if (ui.instEditorShown)
-		drawC4Rate();
+		drawSampleC4Hz();
 }
 
 void resetVolumes(channel_t *ch)
@@ -308,13 +342,25 @@ void resetVolumes(channel_t *ch)
 	ch->outVol = ch->oldVol;
 	ch->outPan = ch->oldPan;
 
-	ch->status |= IS_Vol + IS_Pan + IS_QuickVol;
+	ch->status |= CS_UPDATE_VOL + CS_UPDATE_PAN + CS_USE_QUICK_VOLRAMP;
 }
 
 void triggerInstrument(channel_t *ch)
 {
-	if (!(ch->vibTremCtrl & 0x04)) ch->vibratoPos = 0;
-	if (!(ch->vibTremCtrl & 0x40)) ch->tremoloPos = 0;
+	// reset vibrato pos
+	if (!(ch->vibTremCtrl & 0x04))
+		ch->vibratoPos = 0;
+
+	/* In original FT2, if the sixth bit of "ch->vibTremCtrl" is set
+	** (from effect E7x where x is $4..$7 or $C..$F) and you trigger a note,
+	** the replayer interrupt will freeze / lock up. This is because of a
+	** label bug in the original code, causing it to jump back to itself
+	** indefinitely.
+	*/
+
+	// safely reset tremolo position ;)
+	if (!(ch->vibTremCtrl & 0x40))
+		ch->tremoloPos = 0;
 
 	ch->noteRetrigCounter = 0;
 	ch->tremorPos = 0;
@@ -338,7 +384,9 @@ void triggerInstrument(channel_t *ch)
 		}
 
 		// reset fadeout
-		ch->fadeoutSpeed = ins->fadeout; // warning: FT2 doesn't check if fadeout is more than 4095!
+		ch->fadeoutSpeed = ins->fadeout;
+
+		// final fadeout range is in fact 0..32768, and not 0..65536 like the XM format doc says
 		ch->fadeoutVol = 32768;
 
 		// reset auto-vibrato
@@ -365,7 +413,7 @@ void keyOff(channel_t *ch)
 	ch->keyOff = true;
 
 	instr_t *ins = ch->instrPtr;
-	assert(ins != NULL);
+	ASSERT(ins != NULL);
 
 	if (ins->volEnvFlags & ENV_ENABLED)
 	{
@@ -376,7 +424,7 @@ void keyOff(channel_t *ch)
 	{
 		ch->realVol = 0;
 		ch->outVol = 0;
-		ch->status |= IS_Vol + IS_QuickVol;
+		ch->status |= CS_UPDATE_VOL + CS_USE_QUICK_VOLRAMP;
 	}
 
 	if (!(ins->panEnvFlags & ENV_ENABLED)) // FT2 logic bug!
@@ -386,44 +434,65 @@ void keyOff(channel_t *ch)
 	}
 }
 
-void calcReplayerLogTab(void) // for linear period -> hz calculation
+void calcReplayerVars(int32_t referenceFt2AudioFreq, int32_t audioFreq)
 {
-	for (int32_t i = 0; i < 32; i++)
-		dExp2MulTab[i] = 1.0 / exp2(i); // 1/(2^i)
-
-	for (int32_t i = 0; i < 4*12*16; i++)
-		dLogTab[i] = (8363.0 * 256.0) * exp2(i / (4.0 * 12.0 * 16.0));
-}
-
-void calcReplayerVars(int32_t audioFreq)
-{
-	assert(audioFreq > 0);
+	ASSERT(audioFreq > 0);
 	if (audioFreq <= 0)
 		return;
 
-	audio.dHz2MixDeltaMul = (double)MIXER_FRAC_SCALE / audioFreq;
-	audio.quickVolRampSamples = (uint32_t)round(audioFreq / (1000.0 / FT2_QUICK_VOLRAMP_MILLISECONDS));
+#define FT2_MIX_FRAC_SCALE 65536
+#define FT2_MID_C_RATE 8363
+#define FT2_MID_C_AMIGA_PERIOD 1712
+
+	/* referenceFt2AudioFreq is the reference FT2 audio output rate.
+	** 44000Hz for tracker in live mode (matches FT2+SB16 at max rate)
+	** and actual WAV render rate (up to 48kHz) for WAV render mode.
+	*/
+
+	// max rate possible in FT2 (WAV render mode)
+	if (referenceFt2AudioFreq > 48000)
+		referenceFt2AudioFreq = 48000;
+	
+	const double dRefFreq = referenceFt2AudioFreq;
+
+	// "Boy, what a mess."
+	frequencyMulFactor = (uint32_t)round(256.0 * FT2_MIX_FRAC_SCALE / dRefFreq * FT2_MID_C_RATE);
+	frequencyDivFactor = (uint32_t)round(FT2_MIX_FRAC_SCALE * FT2_MID_C_AMIGA_PERIOD / dRefFreq * FT2_MID_C_RATE);
+	dScopeDeltaMul = ((SCOPE_FRAC_SCALE / (double)FT2_MIX_FRAC_SCALE) * dRefFreq) / SCOPE_HZ;
+	dScopeDrawDeltaMul = ((SCOPE_DRAW_FRAC_SCALE / (double)FT2_MIX_FRAC_SCALE) * dRefFreq) / (FT2_MID_C_RATE / 2.0);
+	dDeltaMul = ((MIXER_FRAC_SCALE / (double)FT2_MIX_FRAC_SCALE) * dRefFreq) / audioFreq;
+
+	const double dQuickVolRampSamples = (double)referenceFt2AudioFreq / (int32_t)(referenceFt2AudioFreq / 200);
+	audio.quickVolRampSamples = (uint32_t)round(audioFreq / dQuickVolRampSamples);
 	audio.fQuickVolRampSamplesMul = (float)(1.0 / audio.quickVolRampSamples);
 
 	for (int32_t bpm = MIN_BPM; bpm <= MAX_BPM; bpm++)
 	{
-		const int32_t i = bpm - MIN_BPM; // index for tables
+		double dFt2BPMHz;
+		if (config.specialFlags2 & PRECISE_BPM)
+		{
+			dFt2BPMHz = bpm / 2.5; // what you see is what you get ;)
+		}
+		else
+		{
+			// use same lower BPM precision as FT2 w/ SB16 at 44000Hz (max rate)
+			const int32_t ft2SamplesPerTick = ((referenceFt2AudioFreq << 1) + (referenceFt2AudioFreq >> 1)) / bpm;
+			dFt2BPMHz = referenceFt2AudioFreq / (double)ft2SamplesPerTick;
+		}
 
-		const double dBpmHz = bpm / 2.5;
-		const double dSamplesPerTick = audioFreq / dBpmHz;
+		const double dSamplesPerTick = audioFreq / dFt2BPMHz;
+		double dSamplesPerTickInt, dSamplesPerTickFrac = modf(dSamplesPerTick, &dSamplesPerTickInt);
 
-		double dSamplesPerTickInt;
-		double dSamplesPerTickFrac = modf(dSamplesPerTick, &dSamplesPerTickInt);
+		// for performance counter (syncing visuals to audio)
+		double dTickTime = (double)hpcFreq.freq64 / dFt2BPMHz;
+		double dTickTimeInt, dTickTimeFrac = modf(dTickTime, &dTickTimeInt);
 
+		const int32_t i = bpm - MIN_BPM;
 		audio.samplesPerTickIntTab[i] = (uint32_t)dSamplesPerTickInt;
-		audio.samplesPerTickFracTab[i] = (uint64_t)((dSamplesPerTickFrac * BPM_FRAC_SCALE) + 0.5); // rounded
-
-		// BPM Hz -> tick length for performance counter (syncing visuals to audio)
-		double dTimeInt;
-		double dTimeFrac = modf(editor.dPerfFreq / dBpmHz, &dTimeInt);
-
-		audio.tickTimeIntTab[i] = (uint32_t)dTimeInt;
-		audio.tickTimeFracTab[i] = (uint64_t)((dTimeFrac * TICK_TIME_FRAC_SCALE) + 0.5); // rounded
+		audio.samplesPerTickFracTab[i] = (uint64_t)(dSamplesPerTickFrac * BPM_FRAC_SCALE);
+		songTickDuration52fp[i] = (uint64_t)round((1ULL << 52ULL) / dFt2BPMHz);
+		audio.tickTimeIntTab[i] = (uint32_t)dTickTimeInt;
+		audio.tickTimeFracTab[i] = (uint64_t)(dTickTimeFrac * TICK_TIME_FRAC_SCALE);
 	}
 }
 
@@ -485,7 +554,7 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 
 	ch->noteNum = note;
 
-	assert(ch->instrNum <= 130);
+	ASSERT(ch->instrNum <= 130);
 	instr_t *ins = instr[ch->instrNum];
 	if (ins == NULL)
 		ins = instr[0]; // empty instruments use this placeholder instrument
@@ -516,13 +585,13 @@ void triggerNote(uint8_t note, uint8_t efx, uint8_t efxData, channel_t *ch)
 
 	if (note != 0)
 	{
-		const uint16_t noteIndex = ((note-1) * 16) + (((int8_t)ch->finetune >> 3) + 16); // 0..1920
+		const uint16_t noteIndex = ((note-1) * 16) + (((int8_t)ch->finetune >> 3) + 16); // 0..1935
 
-		assert(note2PeriodLUT != NULL);
+		ASSERT(note2PeriodLUT != NULL);
 		ch->outPeriod = ch->realPeriod = note2PeriodLUT[noteIndex];
 	}
 
-	ch->status |= IS_Period + IS_Vol + IS_Pan + IS_Trigger + IS_QuickVol;
+	ch->status |= CF_UPDATE_PERIOD + CS_UPDATE_VOL + CS_UPDATE_PAN + CS_TRIGGER_VOICE + CS_USE_QUICK_VOLRAMP;
 
 	if (efx == 9) // 9xx (Set Sample Offset)
 	{
@@ -560,7 +629,7 @@ static void finePitchSlideUp(channel_t *ch, uint8_t param)
 		ch->realPeriod = 1;
 
 	ch->outPeriod = ch->realPeriod;
-	ch->status |= IS_Period;
+	ch->status |= CF_UPDATE_PERIOD;
 }
 
 static void finePitchSlideDown(channel_t *ch, uint8_t param)
@@ -575,12 +644,12 @@ static void finePitchSlideDown(channel_t *ch, uint8_t param)
 		ch->realPeriod = 32000-1;
 
 	ch->outPeriod = ch->realPeriod;
-	ch->status |= IS_Period;
+	ch->status |= CF_UPDATE_PERIOD;
 }
 
 static void setPortamentoCtrl(channel_t *ch, uint8_t param)
 {
-	ch->portaSemitoneSlides = (param != 0);
+	ch->semitonePortaMode = (param != 0);
 }
 
 static void setVibratoCtrl(channel_t *ch, uint8_t param)
@@ -625,7 +694,7 @@ static void fineVolSlideUp(channel_t *ch, uint8_t param)
 		ch->realVol = 64;
 
 	ch->outVol = ch->realVol;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 }
 
 static void fineVolFineDown(channel_t *ch, uint8_t param)
@@ -640,7 +709,7 @@ static void fineVolFineDown(channel_t *ch, uint8_t param)
 		ch->realVol = 0;
 
 	ch->outVol = ch->realVol;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 }
 
 static void noteCut0(channel_t *ch, uint8_t param)
@@ -649,7 +718,7 @@ static void noteCut0(channel_t *ch, uint8_t param)
 	{
 		ch->realVol = 0;
 		ch->outVol = 0;
-		ch->status |= IS_Vol + IS_QuickVol;
+		ch->status |= CS_UPDATE_VOL + CS_USE_QUICK_VOLRAMP;
 	}
 }
 
@@ -663,22 +732,22 @@ static void patternDelay(channel_t *ch, uint8_t param)
 
 static const efxRoutine EJumpTab_TickZero[16] =
 {
-	dummy,				// 0
-	finePitchSlideUp,	// 1
-	finePitchSlideDown,	// 2
-	setPortamentoCtrl,	// 3
-	setVibratoCtrl,		// 4
-	dummy,				// 5
-	patternLoop,		// 6
-	setTremoloCtrl,		// 7
-	dummy,				// 8
-	dummy,				// 9
-	fineVolSlideUp,		// A
-	fineVolFineDown,	// B
-	noteCut0,			// C
-	dummy,				// D
-	patternDelay,		// E
-	dummy				// F
+	dummy,              // 0
+	finePitchSlideUp,   // 1
+	finePitchSlideDown, // 2
+	setPortamentoCtrl,  // 3
+	setVibratoCtrl,     // 4
+	dummy,              // 5
+	patternLoop,        // 6
+	setTremoloCtrl,     // 7
+	dummy,              // 8
+	dummy,              // 9
+	fineVolSlideUp,     // A
+	fineVolFineDown,    // B
+	noteCut0,           // C
+	dummy,              // D
+	patternDelay,       // E
+	dummy               // F
 };
 
 static void E_Effects_TickZero(channel_t *ch, uint8_t param)
@@ -754,7 +823,7 @@ static void setGlobalVolume(channel_t *ch, uint8_t param)
 	// update all voice volumes
 	channel_t *c = channel;
 	for (int32_t i = 0; i < song.numChannels; i++, c++)
-		c->status |= IS_Vol;
+		c->status |= CS_UPDATE_VOL;
 
 	(void)ch;
 }
@@ -766,14 +835,12 @@ static void setEnvelopePos(channel_t *ch, uint8_t param)
 	int32_t tick;
 
 	instr_t *ins = ch->instrPtr;
-	assert(ins != NULL);
-
-	// (envelope precision has been upgraded from .8fp to single-precision float)
+	ASSERT(ins != NULL);
 
 	// *** VOLUME ENVELOPE ***
 	if (ins->volEnvFlags & ENV_ENABLED)
 	{
-		ch->volEnvTick = param-1;
+		ch->volEnvTick = param - 1;
 
 		point = 0;
 		envUpdate = true;
@@ -795,19 +862,23 @@ static void setEnvelopePos(channel_t *ch, uint8_t param)
 						break;
 					}
 
-					const int32_t xDiff = ins->volEnvPoints[point+1][0] - ins->volEnvPoints[point+0][0];
+					const int16_t x0 = ins->volEnvPoints[point+0][0];
+					const int16_t x1 = ins->volEnvPoints[point+1][0];
+
+					const int16_t xDiff = x1 - x0;
 					if (xDiff <= 0)
 					{
 						envUpdate = true;
 						break;
 					}
 
-					const int32_t y0 = ins->volEnvPoints[point+0][1] & 0xFF;
-					const int32_t y1 = ins->volEnvPoints[point+1][1] & 0xFF;
-					const int32_t yDiff = y1 - y0;
+					const int16_t y0 = ins->volEnvPoints[point+0][1];
+					const int16_t y1 = ins->volEnvPoints[point+1][1];
 
-					ch->fVolEnvDelta = (float)yDiff / (float)xDiff;
-					ch->fVolEnvValue = (float)y0 + (ch->fVolEnvDelta * (tick-1));
+					const int8_t yDiff = (int8_t)(y1 - y0);
+					ch->volEnvDelta = (yDiff << 8) / xDiff;
+
+					ch->volEnvValue = ((int8_t)y0 << 8) + (int16_t)(ch->volEnvDelta * (tick-1));
 
 					point++;
 
@@ -824,13 +895,13 @@ static void setEnvelopePos(channel_t *ch, uint8_t param)
 
 		if (envUpdate)
 		{
-			ch->fVolEnvDelta = 0.0f;
-			ch->fVolEnvValue = (float)(int32_t)(ins->volEnvPoints[point][1] & 0xFF);
+			ch->volEnvDelta = 0;
+			ch->volEnvValue = (int8_t)ins->volEnvPoints[point][1] << 8;
 		}
 
 		if (point >= ins->volEnvLength)
 		{
-			point = ins->volEnvLength-1;
+			point = ins->volEnvLength - 1;
 			if (point < 0)
 				point = 0;
 		}
@@ -841,7 +912,7 @@ static void setEnvelopePos(channel_t *ch, uint8_t param)
 	// *** PANNING ENVELOPE ***
 	if (ins->volEnvFlags & ENV_SUSTAIN) // FT2 logic bug: should've been ins->panEnvFlags
 	{
-		ch->panEnvTick = param-1;
+		ch->panEnvTick = param - 1;
 
 		point = 0;
 		envUpdate = true;
@@ -863,19 +934,23 @@ static void setEnvelopePos(channel_t *ch, uint8_t param)
 						break;
 					}
 
-					const int32_t xDiff = ins->panEnvPoints[point+1][0] - ins->panEnvPoints[point+0][0];
+					const int16_t x0 = ins->panEnvPoints[point+0][0];
+					const int16_t x1 = ins->panEnvPoints[point+1][0];
+
+					const int16_t xDiff = x1 - x0;
 					if (xDiff <= 0)
 					{
 						envUpdate = true;
 						break;
 					}
 
-					const int32_t y0 = ins->panEnvPoints[point+0][1] & 0xFF;
-					const int32_t y1 = ins->panEnvPoints[point+1][1] & 0xFF;
-					const int32_t yDiff = y1 - y0;
+					const int16_t y0 = ins->panEnvPoints[point+0][1];
+					const int16_t y1 = ins->panEnvPoints[point+1][1];
 
-					ch->fPanEnvDelta = (float)yDiff / (float)xDiff;
-					ch->fPanEnvValue = (float)y0 + (ch->fPanEnvDelta * (tick-1));
+					const int8_t yDiff = (int8_t)(y1 - y0);
+					ch->panEnvDelta = (yDiff << 8) / xDiff;
+
+					ch->panEnvValue = ((int8_t)y0 << 8) + (int16_t)(ch->panEnvDelta * (tick-1));
 
 					point++;
 
@@ -892,13 +967,13 @@ static void setEnvelopePos(channel_t *ch, uint8_t param)
 
 		if (envUpdate)
 		{
-			ch->fPanEnvDelta = 0.0f;
-			ch->fPanEnvValue = (float)(int32_t)(ins->panEnvPoints[point][1] & 0xFF);
+			ch->panEnvDelta = 0;
+			ch->panEnvValue = (int8_t)ins->panEnvPoints[point][1] << 8;
 		}
 
 		if (point >= ins->panEnvLength)
 		{
-			point = ins->panEnvLength-1;
+			point = ins->panEnvLength - 1;
 			if (point < 0)
 				point = 0;
 		}
@@ -909,42 +984,42 @@ static void setEnvelopePos(channel_t *ch, uint8_t param)
 
 static const efxRoutine JumpTab_TickZero[36] =
 {
-	dummy,				// 0
-	dummy,				// 1
-	dummy,				// 2
-	dummy,				// 3
-	dummy,				// 4
-	dummy,				// 5
-	dummy,				// 6
-	dummy,				// 7
-	dummy,				// 8
-	dummy,				// 9
-	dummy,				// A
-	positionJump,		// B
-	dummy,				// C
-	patternBreak,		// D
-	E_Effects_TickZero,	// E
-	setSpeed,			// F
-	setGlobalVolume,	// G
-	dummy,				// H
-	dummy,				// I
-	dummy,				// J
-	dummy,				// K
-	setEnvelopePos,		// L
-	dummy,				// M
-	dummy,				// N
-	dummy,				// O
-	dummy,				// P
-	dummy,				// Q
-	dummy,				// R
-	dummy,				// S
-	dummy,				// T
-	dummy,				// U
-	dummy,				// V
-	dummy,				// W
-	dummy,				// X
-	dummy,				// Y
-	dummy 				// Z
+	dummy,              // 0
+	dummy,              // 1
+	dummy,              // 2
+	dummy,              // 3
+	dummy,              // 4
+	dummy,              // 5
+	dummy,              // 6
+	dummy,              // 7
+	dummy,              // 8
+	dummy,              // 9
+	dummy,              // A
+	positionJump,       // B
+	dummy,              // C
+	patternBreak,       // D
+	E_Effects_TickZero, // E
+	setSpeed,           // F
+	setGlobalVolume,    // G
+	dummy,              // H
+	dummy,              // I
+	dummy,              // J
+	dummy,              // K
+	setEnvelopePos,     // L
+	dummy,              // M
+	dummy,              // N
+	dummy,              // O
+	dummy,              // P
+	dummy,              // Q
+	dummy,              // R
+	dummy,              // S
+	dummy,              // T
+	dummy,              // U
+	dummy,              // V
+	dummy,              // W
+	dummy,              // X
+	dummy,              // Y
+	dummy               // Z
 };
 
 static void handleMoreEffects_TickZero(channel_t *ch) // called even if channel is muted!
@@ -973,7 +1048,7 @@ static void v_SetVolume(channel_t *ch, uint8_t *volColumnData)
 		*volColumnData = 64;
 
 	ch->outVol = ch->realVol = *volColumnData;
-	ch->status |= IS_Vol + IS_QuickVol;
+	ch->status |= CS_UPDATE_VOL + CS_USE_QUICK_VOLRAMP;
 }
 
 static void v_FineVolSlideDown(channel_t *ch, uint8_t *volColumnData)
@@ -983,7 +1058,7 @@ static void v_FineVolSlideDown(channel_t *ch, uint8_t *volColumnData)
 		*volColumnData = 0;
 
 	ch->outVol = ch->realVol = *volColumnData;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 }
 
 static void v_FineVolSlideUp(channel_t *ch, uint8_t *volColumnData)
@@ -993,7 +1068,7 @@ static void v_FineVolSlideUp(channel_t *ch, uint8_t *volColumnData)
 		*volColumnData = 64;
 
 	ch->outVol = ch->realVol = *volColumnData;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 }
 
 static void v_SetPan(channel_t *ch, uint8_t *volColumnData)
@@ -1001,7 +1076,7 @@ static void v_SetPan(channel_t *ch, uint8_t *volColumnData)
 	*volColumnData <<= 4;
 
 	ch->outPan = *volColumnData;
-	ch->status |= IS_Pan;
+	ch->status |= CS_UPDATE_PAN;
 }
 
 // -- non-tick-zero volume column effects --
@@ -1013,7 +1088,7 @@ static void v_VolSlideDown(channel_t *ch)
 		newVol = 0;
 
 	ch->outVol = ch->realVol = newVol;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 }
 
 static void v_VolSlideUp(channel_t *ch)
@@ -1023,7 +1098,7 @@ static void v_VolSlideUp(channel_t *ch)
 		newVol = 64;
 
 	ch->outVol = ch->realVol = newVol;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 }
 
 static void v_Vibrato(channel_t *ch)
@@ -1042,7 +1117,7 @@ static void v_PanSlideLeft(channel_t *ch)
 		tmp16 = 0;
 
 	ch->outPan = (uint8_t)tmp16;
-	ch->status |= IS_Pan;
+	ch->status |= CS_UPDATE_PAN;
 }
 
 static void v_PanSlideRight(channel_t *ch)
@@ -1052,7 +1127,7 @@ static void v_PanSlideRight(channel_t *ch)
 		tmp16 = 255;
 
 	ch->outPan = (uint8_t)tmp16;
-	ch->status |= IS_Pan;
+	ch->status |= CS_UPDATE_PAN;
 }
 
 static void v_Portamento(channel_t *ch)
@@ -1092,7 +1167,7 @@ static const volColumnEfxRoutine2 VJumpTab_TickZero[16] =
 static void setPan(channel_t *ch, uint8_t param)
 {
 	ch->outPan = param;
-	ch->status |= IS_Pan;
+	ch->status |= CS_UPDATE_PAN;
 }
 
 static void setVol(channel_t *ch, uint8_t param)
@@ -1101,7 +1176,7 @@ static void setVol(channel_t *ch, uint8_t param)
 		param = 64;
 
 	ch->outVol = ch->realVol = param;
-	ch->status |= IS_Vol + IS_QuickVol;
+	ch->status |= CS_UPDATE_VOL + CS_USE_QUICK_VOLRAMP;
 }
 
 static void extraFinePitchSlide(channel_t *ch, uint8_t param)
@@ -1123,7 +1198,7 @@ static void extraFinePitchSlide(channel_t *ch, uint8_t param)
 			newPeriod = 1;
 
 		ch->outPeriod = ch->realPeriod = newPeriod;
-		ch->status |= IS_Period;
+		ch->status |= CF_UPDATE_PERIOD;
 	}
 	else if (slideType == 2) // slide down
 	{
@@ -1139,7 +1214,7 @@ static void extraFinePitchSlide(channel_t *ch, uint8_t param)
 			newPeriod = 32000-1;
 
 		ch->outPeriod = ch->realPeriod = newPeriod;
-		ch->status |= IS_Period;
+		ch->status |= CF_UPDATE_PERIOD;
 	}
 }
 
@@ -1250,7 +1325,7 @@ static void preparePortamento(channel_t *ch, const note_t *p, uint8_t inst)
 			const uint16_t note = (((p->note-1) + ch->relativeNote) * 16) + (((int8_t)ch->finetune >> 3) + 16);
 			if (note < MAX_NOTES)
 			{
-				assert(note2PeriodLUT != NULL);
+				ASSERT(note2PeriodLUT != NULL);
 				ch->portamentoTargetPeriod = note2PeriodLUT[note];
 
 				if (ch->portamentoTargetPeriod == ch->realPeriod)
@@ -1280,7 +1355,7 @@ static void getNewNote(channel_t *ch, const note_t *p)
 		if (ch->efxData > 0) // we have an arpeggio running, set period back
 		{
 			ch->outPeriod = ch->realPeriod;
-			ch->status |= IS_Period;
+			ch->status |= CF_UPDATE_PERIOD;
 		}
 	}
 	else
@@ -1289,7 +1364,7 @@ static void getNewNote(channel_t *ch, const note_t *p)
 		if ((ch->efx == 4 || ch->efx == 6) && (p->efx != 4 && p->efx != 6))
 		{
 			ch->outPeriod = ch->realPeriod;
-			ch->status |= IS_Period;
+			ch->status |= CF_UPDATE_PERIOD;
 		}
 	}
 
@@ -1383,35 +1458,34 @@ void updateVolPanAutoVib(channel_t *ch)
 {
 	bool envInterpolateFlag, envDidInterpolate;
 	uint8_t envPos;
-	float fEnvVal, fVol;
+	int16_t envVal;
+	float fVol;
 
 	instr_t *ins = ch->instrPtr;
-	assert(ins != NULL);
+	ASSERT(ins != NULL);
 
 	// *** FADEOUT ON KEY OFF ***
 	if (ch->keyOff)
 	{
-		if (ch->fadeoutSpeed > 0) // 0..4095
+		if (ch->fadeoutSpeed > ch->fadeoutVol) // ch->fadeoutVol-ch->fadeoutSpeed < 0?
+		{
+			ch->fadeoutVol = 0;
+			ch->fadeoutSpeed = 0;
+		}
+		else
 		{
 			ch->fadeoutVol -= ch->fadeoutSpeed;
-			if (ch->fadeoutVol <= 0)
-			{
-				ch->fadeoutVol = 0;
-				ch->fadeoutSpeed = 0;
-			}
 		}
 
-		ch->status |= IS_Vol; // always update volume, even if fadeout has reached 0
+		ch->status |= CS_UPDATE_VOL; // always update volume, even if fadeout has reached 0
 	}
 	
 	// handle volumes
 
 	if (!ch->mute)
 	{
-		// (envelope precision has been upgraded from .8fp to single-precision float)
-
 		// *** VOLUME ENVELOPE ***
-		fEnvVal = 0.0f;
+		envVal = 0;
 		if (ins->volEnvFlags & ENV_ENABLED)
 		{
 			envDidInterpolate = false;
@@ -1421,7 +1495,7 @@ void updateVolPanAutoVib(channel_t *ch)
 
 			if (ch->volEnvTick == ins->volEnvPoints[envPos][0])
 			{
-				ch->fVolEnvValue = (float)(int32_t)(ins->volEnvPoints[envPos][1] & 0xFF);
+				ch->volEnvValue = (int8_t)ins->volEnvPoints[envPos][1] << 8;
 
 				envPos++;
 				if (ins->volEnvFlags & ENV_LOOP)
@@ -1434,7 +1508,7 @@ void updateVolPanAutoVib(channel_t *ch)
 						{
 							envPos = ins->volEnvLoopStart;
 							ch->volEnvTick = ins->volEnvPoints[envPos][0];
-							ch->fVolEnvValue = (float)(int32_t)(ins->volEnvPoints[envPos][1] & 0xFF);
+							ch->volEnvValue = (int8_t)ins->volEnvPoints[envPos][1] << 8;
 						}
 					}
 
@@ -1449,7 +1523,7 @@ void updateVolPanAutoVib(channel_t *ch)
 						if (envPos-1 == ins->volEnvSustain)
 						{
 							envPos--;
-							ch->fVolEnvDelta = 0.0f;
+							ch->volEnvDelta = 0;
 							envInterpolateFlag = false;
 						}
 					}
@@ -1458,70 +1532,87 @@ void updateVolPanAutoVib(channel_t *ch)
 					{
 						ch->volEnvPos = envPos;
 
-						const int32_t x0 = ins->volEnvPoints[envPos-1][0];
-						const int32_t x1 = ins->volEnvPoints[envPos-0][0];
+						const int16_t x0 = ins->volEnvPoints[envPos-1][0];
+						const int16_t x1 = ins->volEnvPoints[envPos-0][0];
 
-						const int32_t xDiff = x1 - x0;
+						const int16_t xDiff = x1 - x0;
 						if (xDiff > 0)
 						{
-							const int32_t y0 = ins->volEnvPoints[envPos-1][1] & 0xFF;
-							const int32_t y1 = ins->volEnvPoints[envPos-0][1] & 0xFF;
+							const int16_t y0 = ins->volEnvPoints[envPos-1][1];
+							const int16_t y1 = ins->volEnvPoints[envPos-0][1];
 
-							const int32_t yDiff = y1 - y0;
-							ch->fVolEnvDelta = (float)yDiff / (float)xDiff;
+							const int8_t yDiff = (int8_t)(y1 - y0);
+							ch->volEnvDelta = (yDiff << 8) / xDiff;
 
-							fEnvVal = ch->fVolEnvValue;
+							envVal = ch->volEnvValue;
 							envDidInterpolate = true;
 						}
 						else
 						{
-							ch->fVolEnvDelta = 0.0f;
+							ch->volEnvDelta = 0;
 						}
 					}
 				}
 				else
 				{
-					ch->fVolEnvDelta = 0.0f;
+					ch->volEnvDelta = 0;
 				}
 			}
 
 			if (!envDidInterpolate)
 			{
-				ch->fVolEnvValue += ch->fVolEnvDelta;
+				ch->volEnvValue += ch->volEnvDelta;
+				envVal = ch->volEnvValue;
 
-				fEnvVal = ch->fVolEnvValue;
-				if (fEnvVal < 0.0f || fEnvVal > 64.0f)
+				// FT2 tests the upper byte here (unsigned test!)
+				const uint8_t envHiByte = (uint8_t)(envVal >> 8);
+				if (envHiByte > 64)
 				{
-					fEnvVal = CLAMP(fEnvVal, 0.0f, 64.0f);
-					ch->fVolEnvDelta = 0.0f;
+					if (envHiByte <= 160) // 160 unsigned is -64 signed
+						envVal = 64*256;
+					else
+						envVal = 0;
+
+					ch->volEnvDelta = 0;
 				}
 			}
 
+			// FT2 shifts envVal to the right by 8 here, but we prefer to keep all the bits :)
+
+			// calculate in single-precision float instead of bit-reduced integer arithmetics
+
+			float fEnvVal = (uint16_t)envVal * (1.0f / (64.0f * 256.f));
+			if (fEnvVal > 1.0f) // can happen when we don't shift envVal to the right by 8 first
+				fEnvVal = 1.0f;
+
 			const int32_t vol = song.globalVolume * ch->outVol * ch->fadeoutVol;
-
 			fVol = vol * (1.0f / (64.0f * 64.0f * 32768.0f));
-			fVol *= fEnvVal * (1.0f / 64.0f); // volume envelope value
+			fVol *= fEnvVal;
 
-			ch->status |= IS_Vol; // update mixer vol every tick when vol envelope is enabled
+			ch->status |= CS_UPDATE_VOL; // update mixer vol every tick when vol envelope is enabled
 		}
 		else
 		{
+			// calculate in single-precision float instead of bit-reduced integer arithmetics
 			const int32_t vol = song.globalVolume * ch->outVol * ch->fadeoutVol;
-
 			fVol = vol * (1.0f / (64.0f * 64.0f * 32768.0f));
 		}
 
-		// FT2 doesn't clamp the volume, but let's do it anyway
-		ch->fFinalVol = CLAMP(fVol, 0.0f, 1.0f);
+		// FT2 doesn't clamp the volume, but let's do it just in case
+		if (fVol > 1.0f)
+			fVol = 1.0f;
+
+		ch->fFinalVol = fVol;
 	}
 	else
 	{
+		// instrument muted, zero out volume
 		ch->fFinalVol = 0.0f;
 	}
 
 	// *** PANNING ENVELOPE ***
 
-	fEnvVal = 0.0f;
+	envVal = 0;
 	if (ins->panEnvFlags & ENV_ENABLED)
 	{
 		envDidInterpolate = false;
@@ -1531,7 +1622,7 @@ void updateVolPanAutoVib(channel_t *ch)
 
 		if (ch->panEnvTick == ins->panEnvPoints[envPos][0])
 		{
-			ch->fPanEnvValue = (float)(int32_t)(ins->panEnvPoints[envPos][1] & 0xFF);
+			ch->panEnvValue = (int8_t)ins->panEnvPoints[envPos][1] << 8;
 
 			envPos++;
 			if (ins->panEnvFlags & ENV_LOOP)
@@ -1545,7 +1636,7 @@ void updateVolPanAutoVib(channel_t *ch)
 						envPos = ins->panEnvLoopStart;
 
 						ch->panEnvTick = ins->panEnvPoints[envPos][0];
-						ch->fPanEnvValue = (float)(int32_t)(ins->panEnvPoints[envPos][1] & 0xFF);
+						ch->panEnvValue = (int8_t)ins->panEnvPoints[envPos][1] << 8;
 					}
 				}
 
@@ -1560,7 +1651,7 @@ void updateVolPanAutoVib(channel_t *ch)
 					if (envPos-1 == ins->panEnvSustain)
 					{
 						envPos--;
-						ch->fPanEnvDelta = 0.0f;
+						ch->panEnvDelta = 0;
 						envInterpolateFlag = false;
 					}
 				}
@@ -1569,54 +1660,62 @@ void updateVolPanAutoVib(channel_t *ch)
 				{
 					ch->panEnvPos = envPos;
 
-					const int32_t x0 = ins->panEnvPoints[envPos-1][0];
-					const int32_t x1 = ins->panEnvPoints[envPos-0][0];
+					const int16_t x0 = ins->panEnvPoints[envPos-1][0];
+					const int16_t x1 = ins->panEnvPoints[envPos-0][0];
 
-					const int32_t xDiff = x1 - x0;
+					const int16_t xDiff = x1 - x0;
 					if (xDiff > 0)
 					{
-						const int32_t y0 = ins->panEnvPoints[envPos-1][1] & 0xFF;
-						const int32_t y1 = ins->panEnvPoints[envPos-0][1] & 0xFF;
+						const int16_t y0 = ins->panEnvPoints[envPos-1][1];
+						const int16_t y1 = ins->panEnvPoints[envPos-0][1];
 
-						const int32_t yDiff = y1 - y0;
-						ch->fPanEnvDelta = (float)yDiff / (float)xDiff;
+						const int8_t yDiff = (int8_t)(y1 - y0);
+						ch->panEnvDelta = (yDiff << 8) / xDiff;
 
-						fEnvVal = ch->fPanEnvValue;
+						envVal = ch->panEnvValue;
 						envDidInterpolate = true;
 					}
 					else
 					{
-						ch->fPanEnvDelta = 0.0f;
+						ch->panEnvDelta = 0;
 					}
 				}
 			}
 			else
 			{
-				ch->fPanEnvDelta = 0.0f;
+				ch->panEnvDelta = 0;
 			}
 		}
 
 		if (!envDidInterpolate)
 		{
-			ch->fPanEnvValue += ch->fPanEnvDelta;
+			ch->panEnvValue += ch->panEnvDelta;
+			envVal = ch->panEnvValue;
 
-			fEnvVal = ch->fPanEnvValue;
-			if (fEnvVal < 0.0f || fEnvVal > 64.0f)
+			// FT2 tests the upper byte here (unsigned test!)
+			const uint8_t envHiByte = (uint8_t)(envVal >> 8);
+			if (envHiByte > 64)
 			{
-				fEnvVal = CLAMP(fEnvVal, 0.0f, 64.0f);
-				ch->fPanEnvDelta = 0.0f;
+				if (envHiByte <= 160) // 160 unsigned is -64 signed
+					envVal = 64*256;
+				else
+					envVal = 0;
+
+				ch->panEnvDelta = 0;
 			}
 		}
 
-		fEnvVal -= 32.0f; // center panning envelope value (0..64 -> -32..32)
+		int16_t panMul = ch->outPan - 128;
+		if (panMul >= 0)
+			panMul = 0 - panMul;
+		panMul += 128;
+		panMul <<= 3;
 
-		const int32_t pan = 128 - ABS(ch->outPan - 128);
-		const float fPanAdd = (pan * fEnvVal) * (1.0f / 32.0f);
-		const int32_t newPan = (int32_t)(ch->outPan + fPanAdd); // truncate here, do not round
+		envVal -= 32*256; // center pan env. value (0*256..64*256 -> -32*256..32*256)
+		const int8_t panAdd = (int8_t)((envVal * panMul) >> 16);
 
-		ch->finalPan = (uint8_t)CLAMP(newPan, 0, 255); // FT2 doesn't clamp the pan, but let's do it anyway
-
-		ch->status |= IS_Pan; // update pan every tick because pan envelope is enabled
+		ch->finalPan = (uint8_t)(ch->outPan + panAdd);
+		ch->status |= CS_UPDATE_PAN; // update pan every tick because pan envelope is enabled
 	}
 	else
 	{
@@ -1683,7 +1782,7 @@ void updateVolPanAutoVib(channel_t *ch)
 #endif
 
 		ch->finalPeriod = tmpPeriod;
-		ch->status |= IS_Period;
+		ch->status |= CF_UPDATE_PERIOD;
 	}
 	else
 	{
@@ -1693,14 +1792,14 @@ void updateVolPanAutoVib(channel_t *ch)
 		if (midi.enable)
 		{
 			ch->finalPeriod -= ch->midiPitch;
-			ch->status |= IS_Period;
+			ch->status |= CF_UPDATE_PERIOD;
 		}
 #endif
 	}
 }
 
 // for arpeggio and portamento (semitone-slide mode)
-static uint16_t adjustPeriodFromNote(uint16_t period, uint8_t arpNote, channel_t *ch)
+static uint16_t period2NotePeriod(uint16_t period, uint8_t outputNoteOffset, channel_t *ch)
 {
 	int32_t tmpPeriod;
 
@@ -1727,7 +1826,7 @@ static uint16_t adjustPeriodFromNote(uint16_t period, uint8_t arpNote, channel_t
 			loPeriod = (tmpPeriod - fineTune) & ~15;
 	}
 
-	tmpPeriod = loPeriod + fineTune + (arpNote << 4);
+	tmpPeriod = loPeriod + fineTune + (outputNoteOffset << 4);
 	if (tmpPeriod >= (8*12*16+15)-1) // FT2 bug, should've been 10*12*16+16 (also notice the +2 difference)
 		tmpPeriod = (8*12*16+16)-1;
 
@@ -1763,13 +1862,13 @@ static void doVibrato(channel_t *ch)
 	else
 		ch->outPeriod = ch->realPeriod + tmpVib;
 
-	ch->status |= IS_Period;
+	ch->status |= CF_UPDATE_PERIOD;
 	ch->vibratoPos += ch->vibratoSpeed;
 }
 
 static void arpeggio(channel_t *ch, uint8_t param)
 {
-	uint8_t note;
+	uint8_t noteOffset;
 
 	const uint8_t tick = arpeggioTab[song.tick & 31];
 	if (tick == 0)
@@ -1779,14 +1878,14 @@ static void arpeggio(channel_t *ch, uint8_t param)
 	else
 	{
 		if (tick == 1)
-			note = param >> 4;
+			noteOffset = param >> 4;
 		else
-			note = param & 0x0F; // tick 2
+			noteOffset = param & 0x0F; // tick 2
 
-		ch->outPeriod = adjustPeriodFromNote(ch->realPeriod, note, ch);
+		ch->outPeriod = period2NotePeriod(ch->realPeriod, noteOffset, ch);
 	}
 
-	ch->status |= IS_Period;
+	ch->status |= CF_UPDATE_PERIOD;
 }
 
 static void pitchSlideUp(channel_t *ch, uint8_t param)
@@ -1801,7 +1900,7 @@ static void pitchSlideUp(channel_t *ch, uint8_t param)
 		ch->realPeriod = 1;
 
 	ch->outPeriod = ch->realPeriod;
-	ch->status |= IS_Period;
+	ch->status |= CF_UPDATE_PERIOD;
 }
 
 static void pitchSlideDown(channel_t *ch, uint8_t param)
@@ -1816,7 +1915,7 @@ static void pitchSlideDown(channel_t *ch, uint8_t param)
 		ch->realPeriod = 32000-1;
 
 	ch->outPeriod = ch->realPeriod;
-	ch->status |= IS_Period;
+	ch->status |= CF_UPDATE_PERIOD;
 }
 
 static void portamento(channel_t *ch, uint8_t param)
@@ -1843,12 +1942,12 @@ static void portamento(channel_t *ch, uint8_t param)
 		}
 	}
 
-	if (ch->portaSemitoneSlides)
-		ch->outPeriod = adjustPeriodFromNote(ch->realPeriod, 0, ch);
+	if (ch->semitonePortaMode)
+		ch->outPeriod = period2NotePeriod(ch->realPeriod, 0, ch);
 	else
 		ch->outPeriod = ch->realPeriod;
 
-	ch->status |= IS_Period;
+	ch->status |= CF_UPDATE_PERIOD;
 
 	(void)param;
 }
@@ -1934,7 +2033,7 @@ static void tremolo(channel_t *ch, uint8_t param)
 	}
 
 	ch->outVol = (uint8_t)tremVol;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 
 	ch->tremoloPos += ch->tremoloSpeed;
 }
@@ -1963,7 +2062,7 @@ static void volSlide(channel_t *ch, uint8_t param)
 	}
 
 	ch->outVol = ch->realVol = newVol;
-	ch->status |= IS_Vol;
+	ch->status |= CS_UPDATE_VOL;
 }
 
 static void globalVolSlide(channel_t *ch, uint8_t param)
@@ -1995,7 +2094,7 @@ static void globalVolSlide(channel_t *ch, uint8_t param)
 
 	channel_t *c = channel;
 	for (int32_t i = 0; i < song.numChannels; i++, c++)
-		c->status |= IS_Vol;
+		c->status |= CS_UPDATE_VOL;
 }
 
 static void keyOffCmd(channel_t *ch, uint8_t param)
@@ -2028,7 +2127,7 @@ static void panningSlide(channel_t *ch, uint8_t param)
 	}
 
 	ch->outPan = (uint8_t)newPan;
-	ch->status |= IS_Pan;
+	ch->status |= CS_UPDATE_PAN;
 }
 
 static void tremor(channel_t *ch, uint8_t param)
@@ -2058,7 +2157,7 @@ static void tremor(channel_t *ch, uint8_t param)
 
 	ch->tremorPos = tremorSign | tremorData;
 	ch->outVol = (tremorSign == 0x80) ? ch->realVol : 0;
-	ch->status |= IS_Vol + IS_QuickVol;
+	ch->status |= CS_UPDATE_VOL + CS_USE_QUICK_VOLRAMP;
 }
 
 static void retrigNote(channel_t *ch, uint8_t param)
@@ -2078,7 +2177,7 @@ static void noteCut(channel_t *ch, uint8_t param)
 	if ((uint8_t)(song.speed-song.tick) == param)
 	{
 		ch->outVol = ch->realVol = 0;
-		ch->status |= IS_Vol + IS_QuickVol;
+		ch->status |= CS_UPDATE_VOL + CS_USE_QUICK_VOLRAMP;
 	}
 }
 
@@ -2109,22 +2208,22 @@ static void noteDelay(channel_t *ch, uint8_t param)
 
 static const efxRoutine EJumpTab_TickNonZero[16] =
 {
-	dummy,		// 0
-	dummy,		// 1
-	dummy,		// 2
-	dummy,		// 3
-	dummy,		// 4
-	dummy,		// 5
-	dummy,		// 6
-	dummy,		// 7
-	dummy,		// 8
-	retrigNote,	// 9
-	dummy,		// A
-	dummy,		// B
-	noteCut,	// C
-	noteDelay,	// D
-	dummy,		// E
-	dummy		// F
+	dummy,      // 0
+	dummy,      // 1
+	dummy,      // 2
+	dummy,      // 3
+	dummy,      // 4
+	dummy,      // 5
+	dummy,      // 6
+	dummy,      // 7
+	dummy,      // 8
+	retrigNote, // 9
+	dummy,      // A
+	dummy,      // B
+	noteCut,    // C
+	noteDelay,  // D
+	dummy,      // E
+	dummy       // F
 };
 
 static void E_Effects_TickNonZero(channel_t *ch, uint8_t param)
@@ -2134,42 +2233,42 @@ static void E_Effects_TickNonZero(channel_t *ch, uint8_t param)
 
 static const efxRoutine JumpTab_TickNonZero[36] =
 {
-	arpeggio,		// 0
-	pitchSlideUp,		// 1
-	pitchSlideDown,		// 2
-	portamento,		// 3
-	vibrato,		// 4
-	portamentoPlusVolSlide,	// 5
-	vibratoPlusVolSlide,	// 6
-	tremolo,		// 7
-	dummy,			// 8
-	dummy,			// 9
-	volSlide,		// A
-	dummy,			// B
-	dummy,			// C
-	dummy,			// D
-	E_Effects_TickNonZero,	// E
-	dummy,			// F
-	dummy,			// G
-	globalVolSlide,		// H
-	dummy,			// I
-	dummy,			// J
-	keyOffCmd,		// K
-	dummy,			// L
-	dummy,			// M
-	dummy,			// N
-	dummy,			// O
-	panningSlide,		// P
-	dummy,			// Q
-	doMultiNoteRetrig,	// R
-	dummy,			// S
-	tremor,			// T
-	dummy,			// U
-	dummy,			// V
-	dummy,			// W
-	dummy,			// X
-	dummy,			// Y
-	dummy			// Z
+	arpeggio,               // 0
+	pitchSlideUp,           // 1
+	pitchSlideDown,         // 2
+	portamento,             // 3
+	vibrato,                // 4
+	portamentoPlusVolSlide, // 5
+	vibratoPlusVolSlide,    // 6
+	tremolo,                // 7
+	dummy,                  // 8
+	dummy,                  // 9
+	volSlide,               // A
+	dummy,                  // B
+	dummy,                  // C
+	dummy,                  // D
+	E_Effects_TickNonZero,  // E
+	dummy,                  // F
+	dummy,                  // G
+	globalVolSlide,         // H
+	dummy,                  // I
+	dummy,                  // J
+	keyOffCmd,              // K
+	dummy,                  // L
+	dummy,                  // M
+	dummy,                  // N
+	dummy,                  // O
+	panningSlide,           // P
+	dummy,                  // Q
+	doMultiNoteRetrig,      // R
+	dummy,                  // S
+	tremor,                 // T
+	dummy,                  // U
+	dummy,                  // V
+	dummy,                  // W
+	dummy,                  // X
+	dummy,                  // Y
+	dummy                   // Z
 };
 
 static void handleEffects_TickNonZero(channel_t *ch)
@@ -2232,7 +2331,7 @@ static void getNextPos(void)
 				song.songPos = song.songLoopStart;
 			}
 
-			assert(song.songPos <= 255);
+			ASSERT(song.songPos <= 255);
 			song.pattNum = song.orders[song.songPos & 0xFF];
 			song.currNumRows = patternNumRows[song.pattNum & 0xFF];
 		}
@@ -2261,13 +2360,12 @@ void resumeMusic(void) // starts reading pattern data
 
 void tickReplayer(void) // periodically called from audio callback
 {
-	int32_t i;
 	channel_t *ch;
 
 	if (!songPlaying)
 	{
 		ch = channel;
-		for (i = 0; i < song.numChannels; i++, ch++)
+		for (int32_t i = 0; i < song.numChannels; i++, ch++)
 			updateVolPanAutoVib(ch);
 
 		return;
@@ -2276,10 +2374,10 @@ void tickReplayer(void) // periodically called from audio callback
 	// for song playback counter (hh:mm:ss)
 	if (song.BPM >= MIN_BPM && song.BPM <= MAX_BPM) // just in case
 	{
-		song.playbackSecondsFrac += songTickDuration35fp[song.BPM-MIN_BPM];
-		if (song.playbackSecondsFrac >= 1ULL << 35)
+		song.playbackSecondsFrac += songTickDuration52fp[song.BPM-MIN_BPM];
+		if (song.playbackSecondsFrac >= 1ULL << 52)
 		{
-			song.playbackSecondsFrac &= (1ULL << 35)-1;
+			song.playbackSecondsFrac &= (1ULL << 52)-1;
 			song.playbackSeconds++;
 		}
 	}
@@ -2307,7 +2405,7 @@ void tickReplayer(void) // periodically called from audio callback
 			p = &pattern[song.pattNum][song.row * MAX_CHANNELS];
 
 		ch = channel;
-		for (i = 0; i < song.numChannels; i++, ch++, p++)
+		for (int32_t i = 0; i < song.numChannels; i++, ch++, p++)
 		{
 			getNewNote(ch, p);
 			updateVolPanAutoVib(ch);
@@ -2316,7 +2414,7 @@ void tickReplayer(void) // periodically called from audio callback
 	else
 	{
 		ch = channel;
-		for (i = 0; i < song.numChannels; i++, ch++)
+		for (int32_t i = 0; i < song.numChannels; i++, ch++)
 		{
 			handleEffects_TickNonZero(ch);
 			updateVolPanAutoVib(ch);
@@ -2338,16 +2436,16 @@ void resetMusic(void)
 	if (audioWasntLocked)
 		unlockAudio();
 
-	setPos(0, 0, false);
+	setSongPos(0, 0, DONT_RESET_SONG_TICK);
 
 	if (!songPlaying)
 	{
 		setScrollBarEnd(SB_POS_ED, (song.songLength - 1) + 5);
-		setScrollBarPos(SB_POS_ED, 0, false);
+		setScrollBarPos(SB_POS_ED, 0, DONT_TRIGGER_CALLBACK);
 	}
 }
 
-void setPos(int16_t songPos, int16_t row, bool resetTimer)
+void setSongPos(int16_t songPos, int16_t row, bool resetTick)
 {
 	const bool audioWasntLocked = !audio.locked;
 	if (audioWasntLocked)
@@ -2360,7 +2458,7 @@ void setPos(int16_t songPos, int16_t row, bool resetTimer)
 			song.songPos = song.songLength - 1;
 
 		song.pattNum = song.orders[song.songPos];
-		assert(song.pattNum < MAX_PATTERNS);
+		ASSERT(song.pattNum < MAX_PATTERNS);
 		song.currNumRows = patternNumRows[song.pattNum];
 
 		checkMarkLimits(); // non-FT2 safety
@@ -2390,7 +2488,7 @@ void setPos(int16_t songPos, int16_t row, bool resetTimer)
 		}
 	}
 
-	if (resetTimer)
+	if (resetTick)
 		song.tick = 1;
 
 	if (audioWasntLocked)
@@ -2687,7 +2785,7 @@ bool patternEmpty(uint16_t pattNum)
 
 void updateChanNums(void)
 {
-	assert(!(song.numChannels & 1));
+	ASSERT(!(song.numChannels & 1));
 
 	const int32_t maxChannelsShown = getMaxVisibleChannels();
 
@@ -2701,7 +2799,7 @@ void updateChanNums(void)
 	if (ui.patternEditorShown)
 	{
 		if (ui.channelOffset > song.numChannels-ui.numChannelsShown)
-			setScrollBarPos(SB_CHAN_SCROLL, song.numChannels - ui.numChannelsShown, true);
+			setScrollBarPos(SB_CHAN_SCROLL, song.numChannels - ui.numChannelsShown, TRIGGER_CALLBACK);
 	}
 
 	if (ui.pattChanScrollShown)
@@ -2722,7 +2820,7 @@ void updateChanNums(void)
 		hidePushButton(PB_CHAN_SCROLL_LEFT);
 		hidePushButton(PB_CHAN_SCROLL_RIGHT);
 
-		setScrollBarPos(SB_CHAN_SCROLL, 0, false);
+		setScrollBarPos(SB_CHAN_SCROLL, 0, DONT_TRIGGER_CALLBACK);
 
 		ui.channelOffset = 0;
 	}
@@ -2801,10 +2899,14 @@ void closeReplayer(void)
 		free(instr[131]);
 		instr[131] = NULL;
 	}
-
-	freeQuadraticSplineTable();
-	freeCubicSplineTable();
+	
 	freeWindowedSincTables();
+}
+
+void calcMiscReplayerVars(void)
+{
+	for (int32_t i = 0; i < 4*12*16; i++)
+		logTab[i] = (uint32_t)round(16777216.0 * exp2(i * (1.0 / 768.0)));
 }
 
 bool setupReplayer(void)
@@ -2831,7 +2933,7 @@ bool setupReplayer(void)
 
 	calcPanningTable();
 
-	setPos(0, 0, true); // important!
+	setSongPos(0, 0, RESET_SONG_TICK); // important!
 
 	if (!allocateInstr(0))
 	{
@@ -2865,11 +2967,11 @@ void startPlaying(int8_t mode, int16_t row)
 {
 	lockMixerCallback();
 
-	assert(mode != PLAYMODE_IDLE && mode != PLAYMODE_EDIT);
+	ASSERT(mode != PLAYMODE_IDLE && mode != PLAYMODE_EDIT);
 	if (mode == PLAYMODE_PATT || mode == PLAYMODE_RECPATT)
-		setPos(-1, row, true);
+		setSongPos(-1, row, RESET_SONG_TICK);
 	else
-		setPos(editor.songPos, row, true);
+		setSongPos(editor.songPos, row, RESET_SONG_TICK);
 
 	playMode = mode;
 	songPlaying = true;
@@ -2940,7 +3042,7 @@ void playTone(uint8_t chNum, uint8_t insNum, uint8_t note, int8_t vol, uint16_t 
 	if (ins == NULL)
 		return;
 
-	assert(chNum < MAX_CHANNELS && insNum <= MAX_INST && note <= NOTE_OFF);
+	ASSERT(chNum < MAX_CHANNELS && insNum <= MAX_INST && note <= NOTE_OFF);
 	channel_t *ch = &channel[chNum];
 
 	// FT2 bugfix: don't play note if certain requirements are not met
@@ -3004,7 +3106,7 @@ void playSample(uint8_t chNum, uint8_t insNum, uint8_t smpNum, uint8_t note, uin
 	editor.curPlayInstr = 255;
 	editor.curPlaySmp = 255;
 
-	assert(chNum < MAX_CHANNELS && insNum <= MAX_INST && smpNum < MAX_SMP_PER_INST && note <= NOTE_OFF);
+	ASSERT(chNum < MAX_CHANNELS && insNum <= MAX_INST && smpNum < MAX_SMP_PER_INST && note <= NOTE_OFF);
 	channel_t *ch = &channel[chNum];
 
 	memcpy(&instr[130]->smp[0], &instr[insNum]->smp[smpNum], sizeof (sample_t));
@@ -3036,7 +3138,7 @@ void playSample(uint8_t chNum, uint8_t insNum, uint8_t smpNum, uint8_t note, uin
 
 	unlockAudio();
 
-	while (ch->status & IS_Trigger); // wait for sample to latch in mixer
+	while (ch->status & CS_TRIGGER_VOICE); // wait for voice to trigger in mixer
 
 	// for sampling playback line in Smp. Ed.
 	editor.curPlayInstr = editor.curInstr;
@@ -3055,7 +3157,7 @@ void playRange(uint8_t chNum, uint8_t insNum, uint8_t smpNum, uint8_t note, uint
 	editor.curPlayInstr = 255;
 	editor.curPlaySmp = 255;
 
-	assert(chNum < MAX_CHANNELS && insNum <= MAX_INST && smpNum < MAX_SMP_PER_INST && note <= NOTE_OFF);
+	ASSERT(chNum < MAX_CHANNELS && insNum <= MAX_INST && smpNum < MAX_SMP_PER_INST && note <= NOTE_OFF);
 
 	channel_t *ch = &channel[chNum];
 	sample_t *s = &instr[130]->smp[0];
@@ -3099,7 +3201,7 @@ void playRange(uint8_t chNum, uint8_t insNum, uint8_t smpNum, uint8_t note, uint
 
 	unlockAudio();
 
-	while (ch->status & IS_Trigger); // wait for sample to latch in mixer
+	while (ch->status & CS_TRIGGER_VOICE); // wait for voice to trigger in mixer
 
 	// for sampling playback line in Smp. Ed.
 	editor.curPlayInstr = editor.curInstr;
@@ -3124,14 +3226,10 @@ void stopVoices(void)
 		ch->smpPtr = NULL;
 		ch->instrNum = 0;
 		ch->instrPtr = instr[0]; // important: set instrument pointer to instr 0 (placeholder instrument)
-		ch->status = IS_Vol;
-		ch->realVol = 0;
-		ch->outVol = 0;
-		ch->oldVol = 0;
+		ch->status = CS_UPDATE_VOL;
+		ch->realVol = ch->outVol = ch->oldVol = 0;
 		ch->fFinalVol = 0.0f;
-		ch->oldPan = 128;
-		ch->outPan = 128;
-		ch->finalPan = 128;
+		ch->oldPan = ch->outPan = ch->finalPan = 128;
 		ch->vibratoDepth = 0;
 		ch->midiVibDepth = 0;
 		ch->midiPitch = 0;
@@ -3145,6 +3243,7 @@ void stopVoices(void)
 	editor.curPlaySmp = 255;
 
 	stopAllScopes();
+	resetAudioDither();
 
 	// wait for scope thread to finish, making sure pointers aren't illegal
 	while (editor.scopeThreadBusy);
@@ -3156,7 +3255,7 @@ void stopVoices(void)
 void setNewSongPos(int32_t pos)
 {
 	resetReplayerState(); // FT2 bugfix
-	setPos((int16_t)pos, 0, true);
+	setSongPos((int16_t)pos, 0, RESET_SONG_TICK);
 
 	// FT2 fix: if song speed was 0, set it back to initial speed
 	if (song.speed == 0)
@@ -3240,7 +3339,7 @@ void decCurSmp(void)
 
 	editor.curSmp--;
 	editor.sampleBankOffset = (editor.curSmp / 5) * 5;
-	setScrollBarPos(SB_SAMPLE_LIST, editor.sampleBankOffset, true);
+	setScrollBarPos(SB_SAMPLE_LIST, editor.sampleBankOffset, TRIGGER_CALLBACK);
 
 	updateTextBoxPointers();
 	updateNewSample();
@@ -3257,7 +3356,7 @@ void incCurSmp(void)
 	if (editor.sampleBankOffset > MAX_SMP_PER_INST-5)
 		editor.sampleBankOffset = MAX_SMP_PER_INST-5;
 
-	setScrollBarPos(SB_SAMPLE_LIST, editor.sampleBankOffset, true);
+	setScrollBarPos(SB_SAMPLE_LIST, editor.sampleBankOffset, TRIGGER_CALLBACK);
 
 	updateTextBoxPointers();
 	updateNewSample();

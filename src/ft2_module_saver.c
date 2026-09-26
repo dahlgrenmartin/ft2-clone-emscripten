@@ -276,9 +276,7 @@ bool saveXM(UNICHAR *filenameU)
 	removeSongModifiedFlag();
 
 	fclose(f);
-
 #ifdef __EMSCRIPTEN__
-	// Sync to persistent storage after successful save
 	syncPersistentStorage(false);
 #endif
 
@@ -373,7 +371,7 @@ static bool saveMOD(UNICHAR *filenameU)
 		if (j == 1)
 		{
 			if (ins->fadeout != 0 || ins->volEnvFlags != 0 || ins->panEnvFlags != 0 || ins->autoVibRate > 0 ||
-				GET_LOOPTYPE(smp->flags) == LOOP_BIDI || smp->relativeNote != 0 || ins->midiOn)
+				GET_LOOPTYPE(smp->flags) == LOOP_PINGPONG || smp->relativeNote != 0 || ins->midiOn)
 			{
 				test = true;
 				break;
@@ -477,7 +475,7 @@ static bool saveMOD(UNICHAR *filenameU)
 			if (length > UINT16_MAX)
 				length = UINT16_MAX;
 
-			if (GET_LOOPTYPE(smp->flags) == LOOP_OFF)
+			if (GET_LOOPTYPE(smp->flags) == LOOP_DISABLED)
 			{
 				loopStart = 0;
 				loopLength = 1;
@@ -640,9 +638,7 @@ static bool saveMOD(UNICHAR *filenameU)
 
 	fclose(f);
 	removeSongModifiedFlag();
-
 #ifdef __EMSCRIPTEN__
-	// Sync to persistent storage after successful save
 	syncPersistentStorage(false);
 #endif
 
@@ -656,9 +652,9 @@ modSaveError:
 	return false;
 }
 
-static int32_t SDLCALL saveMusicThread(void *ptr)
+static int32_t saveMusicThread(void *ptr)
 {
-	assert(editor.tmpFilenameU != NULL);
+	ASSERT(editor.tmpFilenameU != NULL);
 	if (editor.tmpFilenameU == NULL)
 		return false;
 
@@ -680,7 +676,7 @@ void saveMusic(UNICHAR *filenameU)
 	UNICHAR_STRCPY(editor.tmpFilenameU, filenameU);
 
 	mouseAnimOn();
-	thread = SDL_CreateThread(saveMusicThread, NULL, NULL);
+	thread = SDL_CreateThread(saveMusicThread, "mod save thread", NULL);
 	if (thread == NULL)
 	{
 		okBoxThreadSafe(0, "System message", "Couldn't create thread!", NULL);

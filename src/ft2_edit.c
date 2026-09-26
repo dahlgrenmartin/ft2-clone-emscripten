@@ -40,6 +40,10 @@ void recordNote(uint8_t note, int8_t vol);
 // when the cursor is at the note slot
 static bool testNoteKeys(SDL_Scancode scancode)
 {
+	// kludge for using enter/return to exit text edit mode causing note trigger
+	if (scancode == SDL_SCANCODE_RETURN && keyb.ignoreNoteEnterKey)
+		return false;
+
 	const int8_t noteNum = scancodeKeyToNote(scancode);
 	if (noteNum == NOTE_OFF)
 	{
@@ -60,7 +64,7 @@ static bool testNoteKeys(SDL_Scancode scancode)
 
 			const uint16_t numRows = patternNumRows[curPattern];
 			if (playMode == PLAYMODE_EDIT && numRows >= 1)
-				setPos(-1, (row + editor.editRowSkip) % numRows, true);
+				setSongPos(-1, (row + editor.editRowSkip) % numRows, RESET_SONG_TICK);
 
 			ui.updatePatternEditor = true;
 			setSongModifiedFlag();
@@ -260,7 +264,7 @@ static bool testEditKeys(SDL_Scancode scancode, SDL_Keycode keycode)
 
 	const int16_t numRows = patternNumRows[curPattern];
 	if (playMode == PLAYMODE_EDIT && numRows >= 1)
-		setPos(-1, (row + editor.editRowSkip) % numRows, true);
+		setSongPos(-1, (row + editor.editRowSkip) % numRows, RESET_SONG_TICK);
 
 	if (i == 0) // if we inserted a zero, check if pattern is empty
 		killPatternIfUnused(curPattern);
@@ -468,7 +472,7 @@ void recordNote(uint8_t noteNum, int8_t vol) // directly ported from the origina
 				{
 					// increase row (only in edit mode)
 					if (numRows >= 1)
-						setPos(-1, (editor.row + editor.editRowSkip) % numRows, true);
+						setSongPos(-1, (editor.row + editor.editRowSkip) % numRows, RESET_SONG_TICK);
 				}
 				else
 				{
@@ -543,7 +547,7 @@ void recordNote(uint8_t noteNum, int8_t vol) // directly ported from the origina
 				{
 					// increase row (only in edit mode)
 					if (numRows >= 1)
-						setPos(-1, (editor.row + editor.editRowSkip) % numRows, true);
+						setSongPos(-1, (editor.row + editor.editRowSkip) % numRows, RESET_SONG_TICK);
 				}
 				else
 				{
@@ -619,7 +623,7 @@ bool handleEditKeys(SDL_Keycode keycode, SDL_Scancode scancode)
 		// increase row (only in edit mode)
 		const int16_t numRows = patternNumRows[curPattern];
 		if (playMode == PLAYMODE_EDIT && numRows >= 1)
-			setPos(-1, (row + editor.editRowSkip) % numRows, true);
+			setSongPos(-1, (row + editor.editRowSkip) % numRows, RESET_SONG_TICK);
 
 		ui.updatePatternEditor = true;
 		setSongModifiedFlag();
@@ -697,7 +701,7 @@ void writeFromMacroSlot(uint8_t slot)
 
 	const int16_t numRows = patternNumRows[curPattern];
 	if (playMode == PLAYMODE_EDIT && numRows >= 1)
-		setPos(-1, (row + editor.editRowSkip) % numRows, true);
+		setSongPos(-1, (row + editor.editRowSkip) % numRows, RESET_SONG_TICK);
 
 	killPatternIfUnused(curPattern);
 

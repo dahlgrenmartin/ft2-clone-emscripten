@@ -82,6 +82,10 @@ void keyUpHandler(SDL_Scancode scancode, SDL_Keycode keycode)
 	if (editor.editTextFlag || ui.sysReqShown)
 		return; // kludge: don't handle key up! (XXX: Is this hack really needed anymore?)
 
+	// kludge for enter/return during text editing (could cause note trigger)
+	if (keycode == SDLK_RETURN)
+		keyb.ignoreNoteEnterKey = false;
+
 	/* Yet another kludge for not leaving a ghost key-up event after an inputBox/okBox
 	** was exited with a key press. They could be picked up as note release events.
 	*/
@@ -388,6 +392,7 @@ static void handleKeys(SDL_Keycode keycode, SDL_Scancode scanKey)
 		break;
 
 		// play pattern
+		case SDLK_MODE: // Alt Gr is SDLK_MODE on some keyboards/layouts
 		case SDLK_RALT:
 		{
 			if (!keyb.leftCtrlPressed) // kludge for Mac (toggle fullscreen)
@@ -912,7 +917,7 @@ static bool checkModifiedKeys(SDL_Keycode keycode)
 					if (ui.extendedPatternEditor) // yet another kludge...
 						exitPatternEditorExtended();
 
-					showTopScreen(false);
+					showTopScreen(DONT_RESTORE_SCREENS);
 				}
 			}
 			else if (keyb.leftAltPressed)
@@ -1179,7 +1184,7 @@ static bool checkModifiedKeys(SDL_Keycode keycode)
 				if (ui.wavRendererShown)     hideWavRenderer();
 				if (ui.trimScreenShown)      hideTrimScreen();
 
-				showTopScreen(false);
+				showTopScreen(DONT_RESTORE_SCREENS);
 				showBottomScreen();
 
 				showPatternEditor();

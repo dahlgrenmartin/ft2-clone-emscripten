@@ -13,117 +13,110 @@
 #include "../ft2_tables.h"
 #include "../ft2_sysreqs.h"
 
-static uint8_t packedPattData[65536];
-
 /* ModPlug Tracker & OpenMPT supports up to 32 samples per instrument for XMs -  we don't.
 ** For such modules, we use a temporary array here to store the extra sample data lengths
 ** we need to skip to be able to load the file (we lose the extra samples, though...).
 */
 static uint32_t extraSampleLengths[32-MAX_SMP_PER_INST];
 
-static bool loadInstrHeader(FILE *f, uint16_t i);
-static bool loadInstrSample(FILE *f, uint16_t i);
-static void unpackPatt(uint8_t *dst, uint8_t *src, uint16_t len, int32_t antChn);
-static bool loadPatterns(FILE *f, uint16_t antPtn, uint16_t xmVersion);
-static void unpackPatt(uint8_t *dst, uint8_t *src, uint16_t len, int32_t antChn);
+static bool loadInstrHeader(FILE *f, int32_t insNum);
+static bool loadInstrSample(FILE *f, int32_t insNum);
+static bool loadPatterns(FILE *f, int32_t numPatterns, uint16_t xmVersion);
+static void unpackPattern(note_t *p, uint8_t *src, int32_t numRows, int32_t numChannels);
 static void loadADPCMSample(FILE *f, sample_t *s); // ModPlug Tracker
 
 bool loadXM(FILE *f, uint32_t filesize)
 {
-	xmHdr_t h;
+	xmHdr_t header;
 
-	if (filesize < sizeof (h))
+	if (filesize < sizeof (header))
 	{
 		loaderMsgBox("Error: This file is either not a module, or is not supported.");
 		return false;
 	}
 
-	if (fread(&h, 1, sizeof (h), f) != sizeof (h))
+	if (fread(&header, 1, sizeof (header), f) != sizeof (header))
 	{
 		loaderMsgBox("Error: This file is either not a module, or is not supported.");
 		return false;
 	}
 
-	if (h.version < 0x0102 || h.version > 0x0104)
+	if (header.version < 0x0102 || header.version > 0x0104)
 	{
-		loaderMsgBox("Error loading XM: Unsupported file version (v%01X.%02X).", (h.version >> 8) & 15, h.version & 0xFF);
+		loaderMsgBox("Error loading XM: Unsupported file version (v%01X.%02X).",
+			(header.version >> 8) & 15, header.version & 0xFF);
 		return false;
 	}
 
-	if (h.numOrders > MAX_ORDERS)
+	if (header.numOrders > MAX_ORDERS)
 	{
 		loaderMsgBox("Error loading XM: The song has more than 256 orders!");
 		return false;
 	}
 
-	if (h.numPatterns > MAX_PATTERNS)
+	if (header.numPatterns > MAX_PATTERNS)
 	{
 		loaderMsgBox("Error loading XM: The song has more than 256 patterns!");
 		return false;
 	}
 
-	if (h.numChannels == 0)
+	// (if >128 instruments, we fake-load up to 128 extra instruments and discard them)
+	if (header.numChannels == 0 || header.numInstr > 256)
 	{
 		loaderMsgBox("Error loading XM: This file is corrupt.");
 		return false;
 	}
 
-	if (h.numInstr > 256) // if >128 instruments, we fake-load up to 128 extra instruments and discard them
-	{
-		loaderMsgBox("Error loading XM: This file is corrupt.");
-		return false;
-	}
-
-	fseek(f, 60 + h.headerSize, SEEK_SET);
+	fseek(f, 60 + header.headerSize, SEEK_SET);
 	if (filesize != 336 && feof(f)) // 336 in length at this point = empty XM
 	{
 		loaderMsgBox("Error loading XM: The module is empty!");
 		return false;
 	}
 
-	memcpy(songTmp.name, h.name, 20);
+	memcpy(songTmp.name, header.name, 20);
 	songTmp.name[20] = '\0';
 
-	songTmp.songLength = h.numOrders;
-	songTmp.songLoopStart = h.songLoopStart;
-	songTmp.numChannels = (uint8_t)h.numChannels;
-	songTmp.BPM = h.BPM;
-	songTmp.speed = h.speed;
-	tmpLinearPeriodsFlag = h.flags & 1;
+	songTmp.songLength = header.numOrders;
+	songTmp.songLoopStart = header.songLoopStart;
+	songTmp.numChannels = (uint8_t)header.numChannels;
+	songTmp.BPM = header.BPM;
+	songTmp.speed = header.speed;
+	tmpLinearPeriodsFlag = !!(header.flags & 1);
 
 	if (songTmp.songLength == 0)
-		songTmp.songLength = 1; // songTmp.songTab is already empty
+		songTmp.songLength = 1; // (songTmp.orders is already zeroed, this is safe)
 	else
-		memcpy(songTmp.orders, h.orders, songTmp.songLength);
+		memcpy(songTmp.orders, header.orders, songTmp.songLength);
 
 	// some strange XMs have the order list padded with 0xFF, remove them!
-	for (int16_t j = 255; j >= 0; j--)
+	for (int32_t i = 255; i >= 0; i--)
 	{
-		if (songTmp.orders[j] != 0xFF)
+		if (songTmp.orders[i] != 0xFF)
 			break;
 
-		if (songTmp.songLength > j)
-			songTmp.songLength = j;
+		if (songTmp.songLength > i)
+			songTmp.songLength = (uint16_t)i;
 	}
 
 	// even though XM supports 256 orders, FT2 supports only 255...
 	if (songTmp.songLength > 255)
 		songTmp.songLength = 255;
 
-	if (h.version < 0x0104)
+	if (header.version < 0x0104)
 	{
 		// XM v1.02 and XM v1.03
 
-		for (uint16_t i = 1; i <= h.numInstr; i++)
+		for (int32_t i = 0; i < header.numInstr; i++)
 		{
 			if (!loadInstrHeader(f, i))
 				return false;
 		}
 
-		if (!loadPatterns(f, h.numPatterns, h.version))
+		if (!loadPatterns(f, header.numPatterns, header.version))
 			return false;
 
-		for (uint16_t i = 1; i <= h.numInstr; i++)
+		for (int32_t i = 0; i < header.numInstr; i++)
 		{
 			if (!loadInstrSample(f, i))
 				return false;
@@ -133,10 +126,10 @@ bool loadXM(FILE *f, uint32_t filesize)
 	{
 		// XM v1.04 (latest version)
 
-		if (!loadPatterns(f, h.numPatterns, h.version))
+		if (!loadPatterns(f, header.numPatterns, header.version))
 			return false;
 
-		for (uint16_t i = 1; i <= h.numInstr; i++)
+		for (int32_t i = 0; i < header.numInstr; i++)
 		{
 			if (!loadInstrHeader(f, i))
 				return false;
@@ -147,14 +140,14 @@ bool loadXM(FILE *f, uint32_t filesize)
 	}
 
 	// if we temporarily loaded more than 128 instruments, clear the extra allocated memory
-	if (h.numInstr > MAX_INST)
+	if (header.numInstr > MAX_INST)
 	{
-		for (int32_t i = MAX_INST+1; i <= h.numInstr; i++)
+		for (int32_t i = MAX_INST; i < header.numInstr; i++)
 		{
-			if (instrTmp[i] != NULL)
+			if (instrTmp[1+i] != NULL)
 			{
-				free(instrTmp[i]);
-				instrTmp[i] = NULL;
+				free(instrTmp[1+i]);
+				instrTmp[1+i] = NULL;
 			}
 		}
 	}
@@ -164,12 +157,16 @@ bool loadXM(FILE *f, uint32_t filesize)
 	** back to max 16 in the headers before loading is done.
 	*/
 	bool instrHasMoreThan16Samples = false;
-	for (int32_t i = 1; i <= MAX_INST; i++)
+	for (int32_t i = 0; i < header.numInstr; i++)
 	{
-		if (instrTmp[i] != NULL && instrTmp[i]->numSamples > MAX_SMP_PER_INST)
+		instr_t *ins = instrTmp[1+i];
+		if (ins == NULL)
+			continue;
+
+		if (ins->numSamples > MAX_SMP_PER_INST)
 		{
+			ins->numSamples = MAX_SMP_PER_INST;
 			instrHasMoreThan16Samples = true;
-			instrTmp[i]->numSamples = MAX_SMP_PER_INST;
 		}
 	}
 
@@ -179,7 +176,7 @@ bool loadXM(FILE *f, uint32_t filesize)
 		loaderMsgBox("Warning: Module contains >32 channels. The extra channels will be discarded!");
 	}
 
-	if (h.numInstr > MAX_INST)
+	if (header.numInstr > MAX_INST)
 		loaderMsgBox("Warning: Module contains >128 instruments. The extra instruments will be discarded!");
 
 	if (instrHasMoreThan16Samples)
@@ -188,13 +185,10 @@ bool loadXM(FILE *f, uint32_t filesize)
 	return true;
 }
 
-static bool loadInstrHeader(FILE *f, uint16_t i)
+static bool loadInstrHeader(FILE *f, int32_t insNum)
 {
 	uint32_t readSize;
 	xmInsHdr_t ih;
-	instr_t *ins;
-	xmSmpHdr_t *src;
-	sample_t *s;
 
 	memset(extraSampleLengths, 0, sizeof (extraSampleLengths));
 	memset(&ih, 0, sizeof (ih));
@@ -224,20 +218,20 @@ static bool loadInstrHeader(FILE *f, uint16_t i)
 		return false;
 	}
 
-	if (i <= MAX_INST) // copy over instrument names
-		memcpy(songTmp.instrName[i], ih.name, 22);
+	if (insNum < MAX_INST) // copy over instrument name
+		memcpy(songTmp.instrName[1+insNum], ih.name, 22);
 
 	if (ih.numSamples > 0 && ih.numSamples <= 32)
 	{
-		if (!allocateTmpInstr(i))
+		if (!allocateTmpInstr(1+insNum))
 		{
 			loaderMsgBox("Not enough memory!");
 			return false;
 		}
+		instr_t *ins = instrTmp[1+insNum];
 
 		// copy instrument header elements to our instrument struct
 
-		ins = instrTmp[i];
 		memcpy(ins->note2SampleLUT, ih.note2SampleLUT, 96);
 		memcpy(ins->volEnvPoints, ih.volEnvPoints, 12*2*sizeof(int16_t));
 		memcpy(ins->panEnvPoints, ih.panEnvPoints, 12*2*sizeof(int16_t));
@@ -276,59 +270,58 @@ static bool loadInstrHeader(FILE *f, uint16_t i)
 		// if instrument contains more than 16 sample headers (unsupported), skip them
 		if (ih.numSamples > MAX_SMP_PER_INST) // can only be 0..32 at this point
 		{
-			const int32_t samplesToSkip = ih.numSamples-MAX_SMP_PER_INST;
+			const int32_t samplesToSkip = ih.numSamples - MAX_SMP_PER_INST;
 			for (int32_t j = 0; j < samplesToSkip; j++)
 			{
 				fread(&extraSampleLengths[j], 4, 1, f); // used for skipping data in loadInstrSample()
-				fseek(f, sizeof (xmSmpHdr_t)-4, SEEK_CUR);
+				fseek(f, sizeof (xmSmpHdr_t) - 4, SEEK_CUR);
 			}
 		}
 
-		for (int32_t j = 0; j < sampleHeadersToRead; j++)
+		xmSmpHdr_t *srcSmp = ih.smp;
+		sample_t *s = ins->smp;
+		for (int32_t j = 0; j < sampleHeadersToRead; j++, s++, srcSmp++)
 		{
-			s = &instrTmp[i]->smp[j];
-			src = &ih.smp[j];
-
 			// copy sample header elements to our sample struct
 
-			s->length = src->length;
-			s->loopStart = src->loopStart;
-			s->loopLength = src->loopLength;
-			s->volume = src->volume;
-			s->finetune = src->finetune;
-			s->flags = src->flags;
-			s->panning = src->panning;
-			s->relativeNote = src->relativeNote;
+			s->length = srcSmp->length;
+			s->loopStart = srcSmp->loopStart;
+			s->loopLength = srcSmp->loopLength;
+			s->volume = srcSmp->volume;
+			s->finetune = srcSmp->finetune;
+			s->flags = srcSmp->flags;
+			s->panning = srcSmp->panning;
+			s->relativeNote = srcSmp->relativeNote;
 
 			/* If the sample is 8-bit mono and nameLength (reserved) is 0xAD,
 			** then this is a 4-bit ADPCM compressed sample (ModPlug Tracker).
 			*/
-			if (src->nameLength == 0xAD && !(src->flags & (SAMPLE_16BIT | SAMPLE_STEREO)))
+			if (srcSmp->nameLength == 0xAD && !(srcSmp->flags & (SAMPLE_16BIT | SAMPLE_STEREO)))
 				s->flags |= SAMPLE_ADPCM;
 
-			memcpy(s->name, src->name, 22);
+			memcpy(s->name, srcSmp->name, 22);
 
-			// dst->dataPtr is set up later
+			// s->dataPtr is set up later
 		}
 	}
 
 	return true;
 }
 
-static bool loadInstrSample(FILE *f, uint16_t i)
+static bool loadInstrSample(FILE *f, int32_t insNum)
 {
-	if (instrTmp[i] == NULL)
+	instr_t *ins = instrTmp[1+insNum];
+	if (ins == NULL)
 		return true; // empty instrument, let's just pretend it got loaded successfully
 
-	uint16_t k = instrTmp[i]->numSamples;
-	if (k > MAX_SMP_PER_INST)
-		k = MAX_SMP_PER_INST;
+	int32_t numSamples = ins->numSamples;
+	if (numSamples > MAX_SMP_PER_INST)
+		numSamples = MAX_SMP_PER_INST;
 
-	sample_t *s = instrTmp[i]->smp;
-
-	if (i > MAX_INST) // insNum > 128, just skip sample data
+	sample_t *s = ins->smp;
+	if (insNum >= MAX_INST) // insNum >= 128, just skip sample data
 	{
-		for (uint16_t j = 0; j < k; j++, s++)
+		for (int32_t i = 0; i < numSamples; i++, s++)
 		{
 			if (s->length > 0)
 				fseek(f, s->length, SEEK_CUR);
@@ -336,7 +329,7 @@ static bool loadInstrSample(FILE *f, uint16_t i)
 	}
 	else
 	{
-		for (uint16_t j = 0; j < k; j++, s++)
+		for (int32_t i = 0; i < numSamples; i++, s++)
 		{
 			if (s->length <= 0)
 			{
@@ -375,9 +368,12 @@ static bool loadInstrSample(FILE *f, uint16_t i)
 				}
 				else
 				{
-					const int32_t sampleLengthInBytes = SAMPLE_LENGTH_BYTES(s);
-					fread(s->dataPtr, 1, sampleLengthInBytes, f);
+					if (sample16Bit)
+						fread(s->dataPtr, 2, s->length, f);
+					else
+						fread(s->dataPtr, 1, s->length, f);
 
+					const int32_t sampleLengthInBytes = SAMPLE_LENGTH_BYTES(s);
 					if (sampleLengthInBytes < lengthInFile)
 						fseek(f, lengthInFile-sampleLengthInBytes, SEEK_CUR);
 
@@ -401,26 +397,25 @@ static bool loadInstrSample(FILE *f, uint16_t i)
 	}
 
 	// skip sample headers if we have more than 16 samples in instrument
-	if (instrTmp[i]->numSamples > MAX_SMP_PER_INST)
+	if (ins->numSamples > MAX_SMP_PER_INST)
 	{
-		const int32_t samplesToSkip = instrTmp[i]->numSamples-MAX_SMP_PER_INST;
-		for (i = 0; i < samplesToSkip; i++)
+		const int32_t samplesToSkip = ins->numSamples - MAX_SMP_PER_INST;
+		for (int32_t i = 0; i < samplesToSkip; i++)
 		{
 			if (extraSampleLengths[i] > 0)
-				fseek(f, extraSampleLengths[i], SEEK_CUR); 
+				fseek(f, extraSampleLengths[i], SEEK_CUR);
 		}
 	}
 
 	return true;
 }
 
-static bool loadPatterns(FILE *f, uint16_t antPtn, uint16_t xmVersion)
+static bool loadPatterns(FILE *f, int32_t numPatterns, uint16_t xmVersion)
 {
-	uint8_t tmpLen;
 	xmPatHdr_t ph;
 
 	bool pattLenWarn = false;
-	for (uint16_t i = 0; i < antPtn; i++)
+	for (int32_t i = 0; i < numPatterns; i++)
 	{
 		if (fread(&ph.headerSize, 4, 1, f) != 1)
 			goto pattCorrupt;
@@ -431,6 +426,7 @@ static bool loadPatterns(FILE *f, uint16_t antPtn, uint16_t xmVersion)
 		ph.numRows = 0;
 		if (xmVersion == 0x0102)
 		{
+			uint8_t tmpLen;
 			if (fread(&tmpLen, 1, 1, f) != 1)
 				goto pattCorrupt;
 
@@ -472,10 +468,10 @@ static bool loadPatterns(FILE *f, uint16_t antPtn, uint16_t xmVersion)
 				return false;
 			}
 
-			if (fread(packedPattData, 1, ph.dataSize, f) != ph.dataSize)
+			if (fread(tmpBuffer, 1, ph.dataSize, f) != ph.dataSize)
 				goto pattCorrupt;
 
-			unpackPatt((uint8_t *)patternTmp[i], packedPattData, patternNumRowsTmp[i], songTmp.numChannels);
+			unpackPattern(patternTmp[i], tmpBuffer, patternNumRowsTmp[i], songTmp.numChannels);
 			clearUnusedChannels(patternTmp[i], patternNumRowsTmp[i], songTmp.numChannels);
 		}
 
@@ -501,78 +497,73 @@ pattCorrupt:
 	return false;
 }
 
-static void unpackPatt(uint8_t *dst, uint8_t *src, uint16_t len, int32_t antChn)
+static void unpackPattern(note_t *p, uint8_t *src, int32_t numRows, int32_t numChannels)
 {
-	int32_t j;
-
-	if (dst == NULL)
+	if (p == NULL)
 		return;
 
-	const int32_t srcEnd = len * (sizeof (note_t) * antChn);
-	int32_t srcIdx = 0;
+	int32_t channelsToLoad = numChannels;
+	if (channelsToLoad > MAX_CHANNELS)
+		channelsToLoad = MAX_CHANNELS;
 
-	int32_t numChannels = antChn;
-	if (numChannels > MAX_CHANNELS)
-		numChannels = MAX_CHANNELS;
+	const int32_t unpackedBytes = numRows * (sizeof (note_t) * numChannels);
 
-	const int32_t pitch = sizeof (note_t) * (MAX_CHANNELS - antChn);
-	for (int32_t i = 0; i < len; i++)
+	int32_t bytesWritten = 0;
+	for (int32_t i = 0; i < numRows; i++)
 	{
-		for (j = 0; j < numChannels; j++)
+		int32_t j;
+		for (j = 0; j < channelsToLoad; j++, p++)
 		{
-			if (srcIdx >= srcEnd)
-				return; // error!
+			if (bytesWritten >= unpackedBytes)
+				return; // pack error!
 
-			const uint8_t note = *src++;
-			if (note & 0x80)
+			const uint8_t byte = *src++;
+			if (byte & 128)
 			{
-				*dst++ = (note & 0x01) ? *src++ : 0;
-				*dst++ = (note & 0x02) ? *src++ : 0;
-				*dst++ = (note & 0x04) ? *src++ : 0;
-				*dst++ = (note & 0x08) ? *src++ : 0;
-				*dst++ = (note & 0x10) ? *src++ : 0;
+				p->note    = (byte &  1) ? *src++ : 0;
+				p->instr   = (byte &  2) ? *src++ : 0;
+				p->vol     = (byte &  4) ? *src++ : 0;
+				p->efx     = (byte &  8) ? *src++ : 0;
+				p->efxData = (byte & 16) ? *src++ : 0;
 			}
 			else
 			{
-				*dst++ = note;
-				*dst++ = *src++;
-				*dst++ = *src++;
-				*dst++ = *src++;
-				*dst++ = *src++;
+				p->note    = byte;
+				p->instr   = *src++;
+				p->vol     = *src++;
+				p->efx     = *src++;
+				p->efxData = *src++;
 			}
 
-			srcIdx += sizeof (note_t);
+			bytesWritten += sizeof (note_t);
 		}
 
-		// if more than 32 channels, skip rest of the channels for this row
-		for (; j < antChn; j++)
+		// if >32 channels, skip rest of the channels for this row
+		for (; j < numChannels; j++)
 		{
-			if (srcIdx >= srcEnd)
-				return; // error!
+			if (bytesWritten >= unpackedBytes)
+				return; // pack error!
 
-			const uint8_t note = *src++;
-			if (note & 0x80)
+			const uint8_t byte = *src++;
+			if (byte & 128)
 			{
-				if (note & 0x01) src++;
-				if (note & 0x02) src++;
-				if (note & 0x04) src++;
-				if (note & 0x08) src++;
-				if (note & 0x10) src++;
+				if (byte &  1) src++;
+				if (byte &  2) src++;
+				if (byte &  4) src++;
+				if (byte &  8) src++;
+				if (byte & 16) src++;
 			}
 			else
 			{
-				src++;
-				src++;
-				src++;
-				src++;
+				src += 4;
 			}
 
-			srcIdx += sizeof (note_t);
+			bytesWritten += sizeof (note_t);
 		}
 
-		// if song has <32 channels, align pointer to next row (skip unused channels)
-		if (antChn < MAX_CHANNELS)
-			dst += pitch;
+		// skip unused channels if if song has <32 channels (we always allocate 32 channels)
+		if (numChannels < MAX_CHANNELS)
+			p += MAX_CHANNELS - numChannels;
 	}
 }
 

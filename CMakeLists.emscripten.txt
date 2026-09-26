@@ -18,7 +18,6 @@ file(GLOB ft2-clone_SRC
     "${CMAKE_CURRENT_SOURCE_DIR}/src/scopes/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/modloaders/*.c"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/smploaders/*.c"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/libflac/*.c"
 )
 
 # Remove rtmidi files (MIDI not supported in browser)
@@ -34,7 +33,6 @@ set_property(TARGET ft2-clone PROPERTY CXX_STANDARD 11)
 # Include directories
 target_include_directories(ft2-clone PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/libflac
     ${CMAKE_CURRENT_SOURCE_DIR}/src/mixer
     ${CMAKE_CURRENT_SOURCE_DIR}/src/scopes
 )
@@ -42,7 +40,6 @@ target_include_directories(ft2-clone PRIVATE
 # Compiler definitions
 target_compile_definitions(ft2-clone PRIVATE
     -DNDEBUG
-    -DHAS_LIBFLAC
     -D__EMSCRIPTEN__
     # Disable MIDI support for web build
     # -DHAS_MIDI is intentionally excluded
@@ -71,7 +68,7 @@ set(EMSCRIPTEN_LINK_FLAGS
     -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_refreshModuleDirectory
     -sFORCE_FILESYSTEM=1
     -lidbfs.js
-    --embed-file "${CMAKE_CURRENT_SOURCE_DIR}/src/gfxdata/bmp@/"
+    --preload-file "${CMAKE_CURRENT_SOURCE_DIR}/src/gfxdata/bmp@/"
     --shell-file "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
 )
 

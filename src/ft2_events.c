@@ -6,9 +6,7 @@
 #ifdef _WIN32
 #define WIN32_MEAN_AND_LEAN
 #include <windows.h>
-#ifndef __EMSCRIPTEN__
 #include <SDL2/SDL_syswm.h>
-#endif
 #else
 #include <limits.h>
 #include <signal.h>
@@ -36,15 +34,15 @@
 #include "ft2_structs.h"
 
 #define CRASH_TEXT "Oh no! The Fasttracker II clone has crashed...\nA backup of the song was hopefully " \
-				   "saved to the current module directory.\n\nPlease report this bug if you can.\n"      \
-				   "Try to mention what you did before the crash happened.\n"                            \
-				   "My email is on the bottom of https://16-bits.org"
+                   "saved to the current module directory.\n\nPlease report this bug if you can.\n" \
+                   "Try to mention what you did before the crash happened.\n" \
+                   "My email is on the bottom of https://16-bits.org"
 
 static bool backupMadeAfterCrash;
 
 #ifdef _WIN32
-#define SYSMSG_FILE_ARG (WM_USER + 1)
-#define ARGV_SHARED_MEM_MAX_LEN ((PATH_MAX + 1) * sizeof(WCHAR))
+#define SYSMSG_FILE_ARG (WM_USER+1)
+#define ARGV_SHARED_MEM_MAX_LEN ((PATH_MAX+1) * sizeof (WCHAR))
 #define SHARED_HWND_NAME TEXT("Local\\FT2CloneHwnd")
 #define SHARED_FILENAME TEXT("Local\\FT2CloneFilename")
 static HWND hWnd;
@@ -132,12 +130,9 @@ void handleEvents(void)
 
 	handleLoadMusicEvents();
 
-	if (editor.samplingAudioFlag)
-		handleSamplingUpdates();
-	if (ui.setMouseBusy)
-		mouseAnimOn();
-	if (ui.setMouseIdle)
-		mouseAnimOff();
+	if (editor.samplingAudioFlag) handleSamplingUpdates();
+	if (ui.setMouseBusy) mouseAnimOn();
+	if (ui.setMouseIdle) mouseAnimOff();
 
 	if (editor.updateWindowTitle)
 	{
@@ -155,13 +150,13 @@ static bool instanceAlreadyOpen(void)
 		return true; // another instance is already open
 
 	// no instance is open, let's created a shared memory file with hWnd in it
-	oneInstHandle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(HWND), SHARED_HWND_NAME);
+	oneInstHandle = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof (HWND), SHARED_HWND_NAME);
 	if (oneInstHandle != NULL)
 	{
-		sharedMemBuf = (LPTSTR)MapViewOfFile(oneInstHandle, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HWND));
+		sharedMemBuf = (LPTSTR)MapViewOfFile(oneInstHandle, FILE_MAP_ALL_ACCESS, 0, 0, sizeof (HWND));
 		if (sharedMemBuf != NULL)
 		{
-			CopyMemory((PVOID)sharedMemBuf, &video.hWnd, sizeof(HWND));
+			CopyMemory((PVOID)sharedMemBuf, &video.hWnd, sizeof (HWND));
 			UnmapViewOfFile(sharedMemBuf);
 			sharedMemBuf = NULL;
 		}
@@ -181,10 +176,10 @@ bool handleSingleInstancing(int32_t argc, char **argv)
 	video.hWnd = wmInfo.info.win.window;
 	if (instanceAlreadyOpen() && argc >= 2 && argv[1][0] != '\0')
 	{
-		sharedMemBuf = (LPTSTR)MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(HWND));
+		sharedMemBuf = (LPTSTR)MapViewOfFile(hMapFile, FILE_MAP_ALL_ACCESS, 0, 0, sizeof (HWND));
 		if (sharedMemBuf != NULL)
 		{
-			memcpy(&hWnd, sharedMemBuf, sizeof(HWND));
+			memcpy(&hWnd, sharedMemBuf, sizeof (HWND));
 
 			UnmapViewOfFile(sharedMemBuf);
 			sharedMemBuf = NULL;
@@ -244,7 +239,7 @@ static void handleSysMsg(SDL_Event inputEvent)
 					SDL_RaiseWindow(video.window);
 				}
 
-				loadDroppedFile((char *)sharedMemBuf, true);
+				loadDroppedFile((char *)sharedMemBuf);
 
 				UnmapViewOfFile(sharedMemBuf);
 				sharedMemBuf = NULL;
@@ -355,7 +350,7 @@ void setupCrashHandler(void)
 	struct sigaction act;
 	struct sigaction oldAct;
 
-	memset(&act, 0, sizeof(act));
+	memset(&act, 0, sizeof (act));
 	act.sa_handler = exceptionHandler;
 	act.sa_flags = SA_RESETHAND;
 
@@ -417,7 +412,7 @@ static void handleSDLEvents(void)
 				if (editor.samplingAudioFlag)
 					stopSampling();
 
-				editor.wavIsRendering = false;
+				editor.stopWavRender = true;
 			}
 
 			continue; // another thread is busy with something, drop input
@@ -467,7 +462,7 @@ static void handleSDLEvents(void)
 				SDL_RaiseWindow(video.window);
 			}
 
-			loadDroppedFile(event.drop.file, true);
+			loadDroppedFile(event.drop.file);
 			SDL_free(event.drop.file);
 		}
 		else if (event.type == SDL_QUIT)

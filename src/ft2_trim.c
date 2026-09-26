@@ -483,7 +483,7 @@ static void wipeSmpDataAfterLoop(bool testWipeSize, int16_t ai)
 		sample_t *s = ins->smp;
 		for (int16_t j = 0; j < l; j++, s++)
 		{
-			if (s->dataPtr != NULL && GET_LOOPTYPE(s->flags) != LOOP_OFF && s->length > 0 && s->length > s->loopStart+s->loopLength)
+			if (s->dataPtr != NULL && GET_LOOPTYPE(s->flags) != LOOP_DISABLED && s->length > 0 && s->length > s->loopStart+s->loopLength)
 			{
 				if (!testWipeSize)
 					unfixSample(s);
@@ -805,7 +805,7 @@ static int64_t calculateTrimSize(void)
 				newPattDataLen += getPackedPattSize(tmpPatt[i], tmpPattLens[i], numChannels);
 		}
 
-		assert(pattDataLen >= newPattDataLen);
+		ASSERT(pattDataLen >= newPattDataLen);
 
 		if (pattDataLen > newPattDataLen)
 			bytes64 += (pattDataLen - newPattDataLen);
@@ -819,7 +819,7 @@ static int64_t calculateTrimSize(void)
 	{
 		int64_t newInstrSize64 = getTempInsAndSmpSize();
 
-		assert(oldInstrSize64 >= newInstrSize64);
+		ASSERT(oldInstrSize64 >= newInstrSize64);
 		if (oldInstrSize64 > newInstrSize64)
 			bytes64 += (oldInstrSize64 - newInstrSize64);
 	}
@@ -828,7 +828,7 @@ static int64_t calculateTrimSize(void)
 	return bytes64;
 }
 
-static int32_t SDLCALL trimThreadFunc(void *ptr)
+static int32_t trimThreadFunc(void *ptr)
 {
 	int16_t i, j, k;
 
@@ -938,7 +938,7 @@ static int32_t SDLCALL trimThreadFunc(void *ptr)
 void trimThreadDone(void)
 {
 	if (removePatt)
-		setPos(song.songPos, song.row, false);
+		setSongPos(song.songPos, song.row, DONT_RESET_SONG_TICK);
 
 	if (removeInst)
 	{
@@ -949,7 +949,7 @@ void trimThreadDone(void)
 	updateTextBoxPointers();
 
 	hideTopScreen();
-	showTopScreen(true);
+	showTopScreen(RESTORE_SCREENS);
 	showBottomScreen();
 
 	if (removeChans)
@@ -957,7 +957,7 @@ void trimThreadDone(void)
 		if (ui.patternEditorShown)
 		{
 			if (ui.channelOffset > song.numChannels-ui.numChannelsShown)
-				setScrollBarPos(SB_CHAN_SCROLL, song.numChannels - ui.numChannelsShown, true);
+				setScrollBarPos(SB_CHAN_SCROLL, song.numChannels - ui.numChannelsShown, TRIGGER_CALLBACK);
 		}
 
 		if (cursor.ch >= ui.channelOffset+ui.numChannelsShown)
@@ -1103,7 +1103,7 @@ void showTrimScreen(void)
 		exitPatternEditorExtended();
 
 	hideTopScreen();
-	showTopScreen(false);
+	showTopScreen(DONT_RESTORE_SCREENS);
 
 	ui.trimScreenShown = true;
 	ui.scopesShown = false;
@@ -1190,7 +1190,7 @@ void pbTrimDoTrim(void)
 	mouseAnimOn();
 	pauseAudio();
 
-	trimThread = SDL_CreateThread(trimThreadFunc, NULL, NULL);
+	trimThread = SDL_CreateThread(trimThreadFunc, "trim thread", NULL);
 	if (trimThread == NULL)
 	{
 		resumeAudio();

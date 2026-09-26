@@ -41,7 +41,6 @@ $sourceFiles = @(
     "src/scopes/*.c"
     "src/modloaders/*.c"
     "src/smploaders/*.c"
-    "src/libflac/*.c"
 )
 
 # Get all source files
@@ -57,7 +56,6 @@ Write-Host "Found $($allSourceFiles.Count) source files" -ForegroundColor Green
 $compilerFlags = @(
     "-O3"
     "-DNDEBUG"
-    "-DHAS_LIBFLAC"
     "-D__EMSCRIPTEN__"
     "-Wall"
     "-Wno-unused-result"
@@ -65,7 +63,6 @@ $compilerFlags = @(
 
     "-Wno-strict-aliasing"
     "-I src"
-    "-I src/libflac"
     "-I src/mixer"
     "-I src/scopes"
 )
@@ -79,9 +76,9 @@ $linkerFlags = @(
     "-sASYNCIFY=1"
     "-sASYNCIFY_STACK_SIZE=65536"
     "-sEXPORTED_RUNTIME_METHODS=[ccall,cwrap,FS]"
-    "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free]"
+    "-sEXPORTED_FUNCTIONS=[_main,_malloc,_free,_refreshModuleDirectory]"
     "-sFORCE_FILESYSTEM=1"
-    "--embed-file src/gfxdata/bmp@/"
+    "--preload-file src/gfxdata/bmp@/"
     "--shell-file web/shell.html"
 )
 
@@ -104,10 +101,10 @@ $arguments += "-sSTACK_SIZE=1048576"
 $arguments += "-sASYNCIFY=1"
 $arguments += "-sASYNCIFY_STACK_SIZE=65536"
 $arguments += "-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS"
-$arguments += "-sEXPORTED_FUNCTIONS=_main,_malloc,_free"
+$arguments += "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_refreshModuleDirectory"
 $arguments += "-sFORCE_FILESYSTEM=1"
 $arguments += "-lidbfs.js"
-$arguments += "--embed-file"
+$arguments += "--preload-file"
 $arguments += "src/gfxdata/bmp@/"
 $arguments += "--shell-file"
 $arguments += "web/shell.html"
