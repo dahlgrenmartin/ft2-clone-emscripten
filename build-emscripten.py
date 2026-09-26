@@ -212,7 +212,7 @@ def build_with_direct_emcc(script_dir, build_dir):
         "-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_refreshModuleDirectory",
         "-sFORCE_FILESYSTEM=1",
         "-lidbfs.js",
-        f"--embed-file={script_dir}/src/gfxdata/bmp@/",
+        f"--preload-file={script_dir}/src/gfxdata/bmp@/",
         f"--shell-file={script_dir}/web/shell.html"
     ]
     

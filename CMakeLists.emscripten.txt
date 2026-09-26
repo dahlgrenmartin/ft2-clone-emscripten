@@ -68,7 +68,7 @@ set(EMSCRIPTEN_LINK_FLAGS
     -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_refreshModuleDirectory
     -sFORCE_FILESYSTEM=1
     -lidbfs.js
-    --embed-file "${CMAKE_CURRENT_SOURCE_DIR}/src/gfxdata/bmp@/"
+    --preload-file "${CMAKE_CURRENT_SOURCE_DIR}/src/gfxdata/bmp@/"
     --shell-file "${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
 )
 
