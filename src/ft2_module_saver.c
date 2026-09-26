@@ -13,6 +13,7 @@
 #include "ft2_module_loader.h"
 #include "ft2_tables.h"
 #include "ft2_structs.h"
+#include "ft2_diskop.h"
 
 static int8_t smpChunkBuf[1024];
 static uint8_t packedPattData[65536], modPattData[64*32*4];
